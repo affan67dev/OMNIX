@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { apiJson, API_BASE } from '../../utils/socialApi';
+import { apiJson, API_BASE, getCurrentUserId } from '../../utils/socialApi';
 import type { SettingsOverview } from '../../types/settings';
 import type { BillingSubscriptionSummary, ProductListing } from '../../types/billing';
 import { PremiumPaywallModal } from './PremiumPaywallModal';
@@ -145,7 +145,7 @@ export function SettingsHub({
 
   const handlePurchase = async () => {
     await runAction('purchase-premium', async () => {
-      const result = await launchPlaySubscriptionPurchase('bytechat_monthly_40', 'local-user');
+      const result = await launchPlaySubscriptionPurchase('bytechat_monthly_40', getCurrentUserId());
       if (result.status === 'cancelled') {
         setStatusMessage('Purchase cancelled before confirmation.');
         return;

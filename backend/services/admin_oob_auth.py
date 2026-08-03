@@ -161,7 +161,6 @@ class AdminOobAuthService:
             {
                 "type": "authorized",
                 "message": "Authorized! Opening Admin Dashboard...",
-                "approval_token": challenge.approved_token,
             },
         )
         return challenge

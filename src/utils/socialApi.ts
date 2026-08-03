@@ -1,10 +1,35 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
 
-export const CURRENT_USER_ID = 'local-user';
-
 type RequestOptions = RequestInit & {
   query?: Record<string, string | number | boolean | undefined>;
 };
+
+type StoredUser = {
+  id?: string;
+};
+
+export function getCurrentUserId(): string {
+  try {
+    const rawUser = window.localStorage.getItem('user');
+    if (!rawUser) {
+      return '';
+    }
+    const parsedUser = JSON.parse(rawUser) as StoredUser;
+    return typeof parsedUser.id === 'string' ? parsedUser.id : '';
+  } catch (error) {
+    console.error('Unable to read current user from local storage', error);
+    return '';
+  }
+}
+
+export function getAccessToken(): string {
+  try {
+    return window.localStorage.getItem('access_token') || '';
+  } catch (error) {
+    console.error('Unable to read access token from local storage', error);
+    return '';
+  }
+}
 
 export async function apiJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const url = new URL(`${API_BASE}${path}`);
@@ -16,13 +41,7 @@ export async function apiJson<T>(path: string, options: RequestOptions = {}): Pr
   });
 
   const headers = new Headers(options.headers ?? {});
-  headers.set('X-User-Id', CURRENT_USER_ID);
-  let accessToken: string | null = null;
-  try {
-    accessToken = window.localStorage.getItem('access_token');
-  } catch (error) {
-    console.error('Unable to read access token from local storage', error);
-  }
+  const accessToken = getAccessToken();
   if (accessToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }

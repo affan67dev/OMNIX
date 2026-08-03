@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import asyncio
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -73,6 +74,9 @@ class BillingService:
             },
         )
 
+    def ensure_user(self, user_id: str) -> Dict[str, Any]:
+        return self._ensure_user(user_id)
+
     def get_subscription_summary(self, user_id: str) -> Dict[str, Any]:
         self.reconcile_user(user_id)
         summary = deepcopy(self._ensure_user(user_id))
@@ -96,7 +100,7 @@ class BillingService:
         credentials = self._load_google_credentials()
         if credentials is None:
             return None
-        credentials.refresh(GoogleAuthRequest())
+        await asyncio.to_thread(credentials.refresh, GoogleAuthRequest())
         return credentials.token
 
     async def _google_subscription_status(self, purchase_token: str) -> Optional[Dict[str, Any]]:

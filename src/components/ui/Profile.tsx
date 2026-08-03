@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { apiJson } from '../../utils/socialApi';
+import { apiJson, getCurrentUserId } from '../../utils/socialApi';
 import type { FollowRequest, MuteDuration, MuteType, ReportReason, SocialOverview, SocialUser } from '../../types/social';
 
 type DiscoverControlState = Record<string, { muteType: MuteType; duration: MuteDuration; reportReason: ReportReason; reportDescription: string }>;
@@ -189,7 +189,7 @@ export function Profile({ username, onLogout }: { username: string; onLogout: ()
                 outgoing_follow_request: current.is_private
                   ? {
                       id: `temp-${current.id}`,
-                      requester_id: 'local-user',
+                      requester_id: getCurrentUserId(),
                       target_id: current.id,
                       status: 'pending',
                       created_at: new Date().toISOString(),

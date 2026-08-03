@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -164,6 +165,77 @@ class SettingsManagementService:
             }
         }
 
+    def ensure_user(self, user_id: str, email: str = "", phone_number: str = "", username: str = "") -> None:
+        self.accounts.setdefault(
+            user_id,
+            {
+                "user_id": user_id,
+                "email": email,
+                "phone_number": phone_number,
+                "gender": "unspecified",
+                "date_of_birth": "",
+                "account_created_date": iso_now(),
+                "first_username": username or user_id,
+                "current_username": username or user_id,
+                "account_status": "active",
+                "is_premium": False,
+                "subscription_expiry_date": None,
+                "subscription_status": "free",
+                "is_deactivated": False,
+                "deactivated_at": None,
+                "deletion_requested_at": None,
+                "deletion_scheduled_for": None,
+                "can_restore_until": None,
+            },
+        )
+        self.security.setdefault(
+            user_id,
+            {
+                "two_factor_enabled": False,
+                "two_factor_method": None,
+                "totp_secret_masked": None,
+                "sms_2fa_phone": phone_number,
+                "login_alerts_enabled": True,
+                "unrecognized_device_alerts": True,
+                "password_changed_at": iso_now(),
+                "backup_codes_remaining": 0,
+            },
+        )
+        self.content_preferences.setdefault(
+            user_id,
+            {
+                "sensitive_content_control": "standard",
+                "hide_like_view_counts": False,
+                "mention_policy": "people_you_follow",
+                "tag_policy": "people_you_follow",
+            },
+        )
+        self.story_settings.setdefault(user_id, {"auto_save_to_archive": True, "save_to_phone_gallery": False})
+        self.storage_settings.setdefault(
+            user_id,
+            {
+                "cache_size_mb": 0,
+                "cellular_data_saver": True,
+                "photo_auto_download": "wifi_only",
+                "video_auto_download": "wifi_only",
+            },
+        )
+        self.notification_settings.setdefault(
+            user_id,
+            {
+                "pause_all_until": None,
+                "push_likes": True,
+                "push_comments": True,
+                "push_new_followers": True,
+                "push_direct_messages": True,
+                "push_calls": True,
+                "push_app_updates": True,
+            },
+        )
+        self.sessions.setdefault(user_id, [])
+        self.data_export_requests.setdefault(user_id, [])
+        self.archives.setdefault(user_id, {"posts": [], "stories": []})
+
     def _ensure_user(self, user_id: str) -> None:
         if user_id not in self.accounts:
             raise SettingsError(404, "Settings account not found")
@@ -314,7 +386,7 @@ class SettingsManagementService:
             "user_id": user_id,
             "channel": channel,
             "destination": destination,
-            "otp_code": "472901",
+            "otp_code": f"{secrets.randbelow(10**6):06d}",
             "expires_at": (utc_now() + timedelta(minutes=10)).isoformat(),
             "verified": False,
         }
@@ -348,7 +420,7 @@ class SettingsManagementService:
         security["pending_2fa_setup"] = {
             "setup_id": setup_id,
             "method": method,
-            "verification_code": "123456",
+            "verification_code": f"{secrets.randbelow(10**6):06d}",
             "created_at": iso_now(),
         }
         return {

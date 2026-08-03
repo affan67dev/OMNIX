@@ -6,7 +6,7 @@ import { Profile } from '../components/ui/Profile';
 import { ChatScreen } from './ChatScreen';
 import { SettingsScreen } from '../components/settings/SettingsScreen';
 import { LaunchSplashScreen } from '../components/app/LaunchSplashScreen';
-import { apiJson, API_BASE, CURRENT_USER_ID } from '../utils/socialApi';
+import { apiJson, API_BASE } from '../utils/socialApi';
 import { consumeDevicePushToken, consumeNativeLaunchPayload, requestNativeNotificationPermission, subscribeToOpenScreen } from '../utils/nativeAppBridge';
 import { SecureLock } from '../components/SecureLock';
 import { hasConfiguredAppLock, verifyAppLock } from '../utils/lockVault';
@@ -169,7 +169,6 @@ export function AuthContainer() {
                 device_id: 'native-webview-shell',
                 app_version: '1.0.0',
               }),
-              headers: { 'X-User-Id': CURRENT_USER_ID },
             });
           } catch {
             // Device token registration is retried on next app launch.
@@ -453,11 +452,7 @@ export function AuthContainer() {
     try {
       const response = await sendSignupOtp(countryCode, phoneNumber);
       setOtpChallengeId(response.challenge_id);
-      if (response.otp_code) {
-        setAvailabilityStatus(`Dev OTP: ${response.otp_code}`);
-      } else {
-        setAvailabilityStatus('OTP has been sent. Enter the 6-digit code.');
-      }
+      setAvailabilityStatus('OTP has been sent. Enter the 6-digit code.');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'OTP request failed');
     } finally {

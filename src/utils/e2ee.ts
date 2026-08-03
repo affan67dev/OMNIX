@@ -1,4 +1,4 @@
-import { CURRENT_USER_ID, apiJson } from './socialApi';
+import { apiJson, getCurrentUserId } from './socialApi';
 import { getSecureJson, setSecureJson } from './cryptoStorage';
 
 type JsonWebKeyPair = {
@@ -30,7 +30,9 @@ type LocalKeyBundle = {
   prekeyKeyId: string;
 };
 
-const KEY_BUNDLE_STORAGE_KEY = `e2ee:keybundle:${CURRENT_USER_ID}`;
+function getKeyBundleStorageKey() {
+  return `e2ee:keybundle:${getCurrentUserId() || 'anonymous'}`;
+}
 
 function bytesToBase64(input: Uint8Array): string {
   return window.btoa(String.fromCharCode(...input));
@@ -84,7 +86,7 @@ async function deriveAesKey(sharedBits: ArrayBuffer, salt: Uint8Array<ArrayBuffe
 }
 
 export async function ensureLocalPublicKeyBundle(): Promise<PublicKeyBundle> {
-  let stored = await getSecureJson<LocalKeyBundle>(KEY_BUNDLE_STORAGE_KEY);
+  let stored = await getSecureJson<LocalKeyBundle>(getKeyBundleStorageKey());
   if (!stored) {
     const identityKeyPair = await exportKeyPair(await generateEcdhKeyPair());
     const prekeyPair = await exportKeyPair(await generateEcdhKeyPair());
@@ -93,12 +95,12 @@ export async function ensureLocalPublicKeyBundle(): Promise<PublicKeyBundle> {
       prekeyPair,
       prekeyKeyId: `prekey-${Date.now()}`,
     };
-    await setSecureJson(KEY_BUNDLE_STORAGE_KEY, stored);
+    await setSecureJson(getKeyBundleStorageKey(), stored);
   }
   const identity = await importStoredKeyPair(stored.identityKeyPair);
   const prekey = await importStoredKeyPair(stored.prekeyPair);
   return {
-    user_id: CURRENT_USER_ID,
+    user_id: getCurrentUserId(),
     algorithm: 'P-256/AES-256-GCM',
     identity_public_key: await exportPublicKeyBase64(identity.publicKey),
     prekey_public_key: await exportPublicKeyBase64(prekey.publicKey),
@@ -108,11 +110,11 @@ export async function ensureLocalPublicKeyBundle(): Promise<PublicKeyBundle> {
 }
 
 async function localPrekeyPair(): Promise<{ keyId: string; keyPair: CryptoKeyPair }> {
-  const stored = await getSecureJson<LocalKeyBundle>(KEY_BUNDLE_STORAGE_KEY);
+  const stored = await getSecureJson<LocalKeyBundle>(getKeyBundleStorageKey());
   if (!stored) {
     await ensureLocalPublicKeyBundle();
   }
-  const resolved = await getSecureJson<LocalKeyBundle>(KEY_BUNDLE_STORAGE_KEY);
+  const resolved = await getSecureJson<LocalKeyBundle>(getKeyBundleStorageKey());
   if (!resolved) {
     throw new Error('Unable to load local E2EE keys');
   }
@@ -169,7 +171,7 @@ export async function decryptDirectMessage(input: {
   }
   const remoteEphemeral = await importPublicKeyBase64(input.sender_ephemeral_public_key);
   const sharedBits = await crypto.subtle.deriveBits({ name: 'ECDH', public: remoteEphemeral }, keyPair.privateKey, 256);
-  const salt = new TextEncoder().encode(`${input.conversationId}:${CURRENT_USER_ID}:${input.recipient_key_id}`);
+  const salt = new TextEncoder().encode(`${input.conversationId}:${getCurrentUserId()}:${input.recipient_key_id}`);
   const aesKey = await deriveAesKey(sharedBits, salt, 'bytechat/e2ee/v1');
   const decrypted = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: base64ToBytes(input.encryption_nonce) },

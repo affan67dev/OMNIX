@@ -6,8 +6,10 @@ from typing import Any, Dict, Optional
 import bcrypt
 import httpx
 import jwt
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, EmailStr
+
+from backend.auth_utils import require_admin_user
 
 router = APIRouter(
     prefix="/auth",
@@ -220,7 +222,8 @@ async def login_user(user: UserLogin):
 
 
 @router.get("/metrics-stream")
-async def get_app_live_metrics():
+async def get_app_live_metrics(authorization: str | None = Header(default=None)):
+    await require_admin_user(authorization)
     return {
         "active_users": 142,
         "api_calls_count": 5230,
