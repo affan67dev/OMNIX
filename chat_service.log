@@ -1,5 +1,0 @@
-nohup: ignoring input
-Traceback (most recent call last):
-  File "/data/data/com.termux/files/home/dashboard_app/omni_project/backend/chat_service.py", line 2, in <module>
-    from database import supabase
-ModuleNotFoundError: No module named 'database'
