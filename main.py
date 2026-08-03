@@ -137,6 +137,7 @@ AUTHENTICATED_PATH_PREFIXES = (
     "/api/v1/billing",
     "/api/v1/push",
     "/api/v1/security",
+    "/api/social",
     "/api/users",
     "/api/reports",
     "/api/stories",
