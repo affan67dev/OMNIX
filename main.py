@@ -3,6 +3,9 @@ OMNIX - Private Social Network Backend
 Production-ready FastAPI application with Supabase integration.
 """
 
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Depends, Request, Header
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,6 +48,38 @@ app.include_router(admin_oob_auth_router)
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.on_event("startup")
+async def startup_checks() -> None:
+    """Emit warnings for missing or insecure production configuration."""
+    import logging
+    log = logging.getLogger("omnix.startup")
+
+    missing: list[str] = []
+    if not os.getenv("SUPABASE_URL") and not os.getenv("VITE_SUPABASE_URL"):
+        missing.append("SUPABASE_URL")
+    if not os.getenv("SUPABASE_ANON_KEY") and not os.getenv("VITE_SUPABASE_ANON_KEY"):
+        missing.append("SUPABASE_ANON_KEY")
+
+    if missing:
+        log.warning(
+            "OMNIX is running WITHOUT Supabase — using local SQLite fallback. "
+            "Set these environment variables for production: %s",
+            ", ".join(missing),
+        )
+
+    if os.getenv("EXPOSE_DEV_OTP", "true").lower() == "true":
+        log.warning(
+            "SECURITY WARNING: EXPOSE_DEV_OTP=true — OTP codes are included in API "
+            "responses. Set EXPOSE_DEV_OTP=false before deploying to production."
+        )
+
+    if os.getenv("ENABLE_DOCS", "false").lower() == "true":
+        log.warning(
+            "SECURITY WARNING: ENABLE_DOCS=true — Swagger UI is publicly accessible. "
+            "Set ENABLE_DOCS=false before deploying to production."
+        )
 
 
 @app.middleware("http")
@@ -337,6 +372,16 @@ class PostRequest(BaseModel):
     visibility: Optional[str] = 'public'
     location: Optional[str] = 'Secure feed'
     tags: Optional[List[str]] = []
+
+    @field_validator('content')
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError('Post content cannot be empty')
+        if len(stripped) > 5000:
+            raise ValueError('Post content cannot exceed 5000 characters')
+        return stripped
 
 
 class PostInteractionRequest(BaseModel):
@@ -1607,8 +1652,8 @@ async def health_check():
     }
 
 
-# Mount React production build
-if os.path.exists("dist"):
+# Mount React production build (only when both dist and dist/assets exist)
+if os.path.exists("dist/assets"):
     app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
 
     @app.get("/{path:path}", response_class=HTMLResponse)
