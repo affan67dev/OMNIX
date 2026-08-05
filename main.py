@@ -1546,6 +1546,29 @@ async def flag_content_for_review(request: Request, req: ModerationRequest):
     }
 
 
+@app.get("/api/admin/metrics")
+async def get_admin_metrics():
+    """Return platform analytics metrics for the admin dashboard."""
+    return {
+        "success": True,
+        "metrics": {
+            "online_users": 0,
+            "ad_revenue": 0.0,
+            "region_distribution": {},
+            "flagged_reports": len([log for log in admin_logs_state if log.get("level") == "FLAG"]),
+        },
+    }
+
+
+@app.post("/api/admin/posts/{post_id}/approve")
+async def approve_post(post_id: str, request: Request):
+    """Approve a flagged post. Requires admin authorization."""
+    x_role = request.headers.get("x-role", "")
+    if x_role.lower() != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+    return {"success": True, "post_id": post_id, "status": "approved"}
+
+
 @app.get("/api/posts/{post_id}")
 async def get_post(post_id: str, x_user_id: Optional[str] = Header(default=None)):
     """Get single post by ID."""
