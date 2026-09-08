@@ -13,8 +13,12 @@ router = APIRouter(prefix="/api/v1/push", tags=["Push Notifications"])
 
 
 def resolve_current_user_id(x_user_id: Optional[str]) -> str:
-    candidate = (x_user_id or "local-user").strip() or "local-user"
-    return candidate if candidate in social_graph.users else "local-user"
+    candidate = (x_user_id or "").strip()
+    if not candidate:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if candidate not in social_graph.users:
+        raise HTTPException(status_code=403, detail="User context is invalid")
+    return candidate
 
 
 def raise_push_error(error: PushNotificationError) -> None:

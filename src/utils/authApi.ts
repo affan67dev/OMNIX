@@ -36,7 +36,6 @@ export type ForgotPasswordResponse = {
   message: string;
   challenge_id?: string;
   expires_at?: string;
-  otp_code?: string;
 };
 
 async function authRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {
@@ -64,7 +63,7 @@ async function authRequest<T>(path: string, body: Record<string, unknown>): Prom
   return payload as T;
 }
 
-export async function sendSignupOtp(countryCode: string, phoneNumber: string): Promise<{ challenge_id: string; expires_at: string; otp_code?: string; message: string }> {
+export async function sendSignupOtp(countryCode: string, phoneNumber: string): Promise<{ challenge_id: string; expires_at: string; message: string }> {
   return authRequest('/api/auth/otp/send', {
     country_code: countryCode,
     phone_number: phoneNumber,

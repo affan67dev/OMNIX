@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import asyncio
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -55,7 +56,7 @@ class PushNotificationService:
         credentials = self._load_google_credentials()
         if credentials is None:
             return None
-        credentials.refresh(GoogleAuthRequest())
+        await asyncio.to_thread(credentials.refresh, GoogleAuthRequest())
         return credentials.token
 
     def register_device(

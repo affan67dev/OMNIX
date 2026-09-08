@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChatDetailsPanel } from '../components/chat/ChatDetailsPanel';
 import { DMLock } from '../components/security/DMLock';
 import type { ChatConversation, ChatDetails, ChatMessage, MuteDuration, ReportReason } from '../types/social';
-import { apiJson, API_BASE } from '../utils/socialApi';
+import { apiJson, API_BASE, getAccessToken } from '../utils/socialApi';
 import { decryptDirectMessage, encryptDirectMessage, fetchRemotePublicKeyBundle, syncLocalPublicKeyBundle } from '../utils/e2ee';
 import { enqueuePendingMessage, flushPendingMessages } from '../utils/offlineMessageQueue';
 import { hasChatLock, verifyChatLock } from '../utils/lockVault';
@@ -30,6 +30,8 @@ export function ChatScreen({ onBack, initialConversationId }: { onBack?: () => v
   const [chatLockBusy, setChatLockBusy] = useState(false);
   const [chatLockError, setChatLockError] = useState('');
   const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptsRef = useRef(0);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === activeConversationId) ?? null,
@@ -110,48 +112,68 @@ export function ChatScreen({ onBack, initialConversationId }: { onBack?: () => v
   useEffect(() => {
     if (!activeConversationId) return undefined;
 
-    eventSourceRef.current?.close();
-    const source = new EventSource(`${API_BASE}/api/chat/conversations/${activeConversationId}/stream`);
-    source.addEventListener('message', (event) => {
-      try {
-        const incomingMessage = JSON.parse(event.data) as ChatMessage;
-        void (async () => {
-          const resolvedMessage = incomingMessage.is_zero_knowledge && incomingMessage.encrypted_payload && incomingMessage.encryption_nonce && incomingMessage.sender_ephemeral_public_key && incomingMessage.recipient_key_id
-            ? {
-                ...incomingMessage,
-                text: await decryptDirectMessage({
-                  conversationId: activeConversationId,
-                  senderUserId: incomingMessage.sender_id,
-                  encrypted_payload: incomingMessage.encrypted_payload,
-                  encryption_nonce: incomingMessage.encryption_nonce,
-                  sender_ephemeral_public_key: incomingMessage.sender_ephemeral_public_key,
-                  recipient_key_id: incomingMessage.recipient_key_id,
-                }).catch(() => '[Unable to decrypt message]'),
-              }
-            : incomingMessage;
-
-          setConversations((prev) => prev.map((conversation) => {
-            if (conversation.id !== activeConversationId) return conversation;
-            if (conversation.messages.some((message) => message.id === resolvedMessage.id)) {
-              return conversation;
-            }
-            return {
-              ...conversation,
-              messages: [...conversation.messages, resolvedMessage],
-            };
-          }));
-        })();
-      } catch (error) {
-        console.error('Unable to parse incoming chat message', error);
+    const openStream = () => {
+      const accessToken = getAccessToken();
+      if (!accessToken) {
+        setChatError('Session expired. Please sign in again.');
+        return;
       }
-    });
-    source.onerror = () => {
-      source.close();
+
+      eventSourceRef.current?.close();
+      const streamUrl = new URL(`${API_BASE}/api/chat/conversations/${activeConversationId}/stream`);
+      streamUrl.searchParams.set('access_token', accessToken);
+      const source = new EventSource(streamUrl.toString());
+      source.addEventListener('message', (event) => {
+        reconnectAttemptsRef.current = 0;
+        try {
+          const incomingMessage = JSON.parse(event.data) as ChatMessage;
+          void (async () => {
+            const resolvedMessage = incomingMessage.is_zero_knowledge && incomingMessage.encrypted_payload && incomingMessage.encryption_nonce && incomingMessage.sender_ephemeral_public_key && incomingMessage.recipient_key_id
+              ? {
+                  ...incomingMessage,
+                  text: await decryptDirectMessage({
+                    conversationId: activeConversationId,
+                    senderUserId: incomingMessage.sender_id,
+                    encrypted_payload: incomingMessage.encrypted_payload,
+                    encryption_nonce: incomingMessage.encryption_nonce,
+                    sender_ephemeral_public_key: incomingMessage.sender_ephemeral_public_key,
+                    recipient_key_id: incomingMessage.recipient_key_id,
+                  }).catch(() => '[Unable to decrypt message]'),
+                }
+              : incomingMessage;
+
+            setConversations((prev) => prev.map((conversation) => {
+              if (conversation.id !== activeConversationId) return conversation;
+              if (conversation.messages.some((message) => message.id === resolvedMessage.id)) {
+                return conversation;
+              }
+              return {
+                ...conversation,
+                messages: [...conversation.messages, resolvedMessage],
+              };
+            }));
+          })();
+        } catch (error) {
+          console.error('Unable to parse incoming chat message', error);
+        }
+      });
+      source.onerror = () => {
+        source.close();
+        reconnectAttemptsRef.current += 1;
+        const delay = Math.min(1000 * 2 ** (reconnectAttemptsRef.current - 1), 10000);
+        reconnectTimerRef.current = window.setTimeout(openStream, delay);
+      };
+      eventSourceRef.current = source;
     };
-    eventSourceRef.current = source;
+
+    openStream();
 
     return () => {
-      source.close();
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      eventSourceRef.current?.close();
       eventSourceRef.current = null;
     };
   }, [activeConversationId]);

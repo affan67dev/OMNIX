@@ -20,6 +20,7 @@ from slowapi.errors import RateLimitExceeded
 from typing import Optional, Dict, List, Any
 import re
 from datetime import datetime, timezone, timedelta
+from backend.auth_utils import fetch_authenticated_user, require_admin_user, require_authenticated_user_id
 from backend.services.social_graph import SocialGraphError, social_graph
 from backend.routes.settings_management import router as settings_management_router
 from backend.routes.billing import router as billing_router
@@ -52,9 +53,17 @@ async def backend_request_guard(request: Request, call_next):
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     request.state.request_id = request_id
     try:
+        if requires_authenticated_user(request.url.path):
+            access_token = request.query_params.get("access_token") if request.url.path.endswith("/stream") else None
+            user_id = await require_authenticated_user_id(request.headers.get("authorization"), access_token=access_token)
+            inject_header(request, "x-user-id", user_id)
+            request.state.user_id = user_id
         response = await call_next(request)
-    except HTTPException:
-        raise
+    except HTTPException as error:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"success": False, "detail": error.detail, "request_id": request_id},
+        )
     except Exception as error:
         add_admin_log("ERROR", f"Unhandled exception {request_id}: {error}")
         return JSONResponse(
@@ -79,14 +88,18 @@ async def app_http_exception_handler(request: Request, exc: HTTPException):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://localhost:80",
-        "http://localhost",
-        os.getenv("FRONTEND_URL", "")
+        origin
+        for origin in [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://localhost:80",
+            "http://localhost",
+            os.getenv("FRONTEND_URL", "").strip(),
+        ]
+        if origin
     ],
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
     allow_credentials=True,
 )
 
@@ -116,6 +129,37 @@ def get_supabase_headers(use_service_key: bool = False) -> dict:
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
+
+
+AUTHENTICATED_PATH_PREFIXES = (
+    "/api/chat",
+    "/api/settings",
+    "/api/v1/billing",
+    "/api/v1/push",
+    "/api/v1/security",
+    "/api/social",
+    "/api/users",
+    "/api/reports",
+    "/api/stories",
+    "/api/posts",
+)
+AUTHENTICATED_EXACT_PATHS = {
+    "/api/chat/conversations",
+    "/api/stories/feed",
+}
+
+
+def requires_authenticated_user(path: str) -> bool:
+    return path in AUTHENTICATED_EXACT_PATHS or path.startswith(AUTHENTICATED_PATH_PREFIXES)
+
+
+def inject_header(request: Request, header_name: str, header_value: str) -> None:
+    normalized = header_name.lower().encode()
+    request.scope["headers"] = [
+        (key, value)
+        for key, value in request.scope["headers"]
+        if key != normalized
+    ] + [(normalized, header_value.encode())]
 
 
 async def supabase_auth_request(endpoint: str, payload: dict, method: str = "POST") -> dict:
@@ -247,14 +291,7 @@ def rank_posts_for_feed(posts: list[dict]) -> list[dict]:
 
 def verify_admin_request(authorization: Optional[str], role: Optional[str] = None, x_role: Optional[str] = None) -> bool:
     """Validate that an admin-only request is coming from an authorized role."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    normalized_role = (role or x_role or "").lower()
-    if normalized_role != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
-
-    return True
+    raise HTTPException(status_code=500, detail="Use async admin validation")
 
 
 def trigger_signup_notification_webhook(payload: dict) -> dict:
@@ -586,8 +623,12 @@ refresh_identity_registry()
 
 
 def resolve_current_user_id(x_user_id: Optional[str]) -> str:
-    candidate = (x_user_id or 'local-user').strip() or 'local-user'
-    return candidate if candidate in social_graph.users else 'local-user'
+    candidate = (x_user_id or "").strip()
+    if not candidate:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if candidate not in social_graph.users:
+        raise HTTPException(status_code=403, detail="User context is invalid")
+    return candidate
 
 
 def raise_social_error(error: SocialGraphError) -> None:
@@ -917,8 +958,15 @@ async def report_user(user_id: str, req: ReportUserRequest, x_user_id: Optional[
 
 
 @app.get("/api/chat/conversations/{conversation_id}/stream")
-async def stream_chat_messages(conversation_id: str, request: Request):
+async def stream_chat_messages(conversation_id: str, request: Request, x_user_id: Optional[str] = Header(default=None)):
     """Expose a simple SSE stream for real-time chat updates."""
+    current_user_id = resolve_current_user_id(x_user_id)
+    conversation = social_graph.conversations.get(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if current_user_id not in conversation.get("participant_user_ids", []):
+        raise HTTPException(status_code=403, detail="Conversation access denied")
+
     queue: asyncio.Queue = asyncio.Queue()
     chat_store.listeners.setdefault(conversation_id, []).append(queue)
 
@@ -1151,7 +1199,7 @@ async def api_send_signup_otp(request: Request, req: OtpSendRequest):
         "expires_at": expires_at.isoformat(),
         "message": "OTP sent successfully",
     }
-    if os.getenv("EXPOSE_DEV_OTP", "true").lower() == "true":
+    if os.getenv("EXPOSE_DEV_OTP", "false").lower() == "true":
         payload["otp_code"] = otp_code
     return payload
 
@@ -1233,7 +1281,7 @@ async def api_forgot_password(request: Request, req: ForgotPasswordRequest):
         "expires_at": expires_at.isoformat(),
         "message": "Password reset OTP sent successfully.",
     }
-    if os.getenv("EXPOSE_DEV_OTP", "true").lower() == "true":
+    if os.getenv("EXPOSE_DEV_OTP", "false").lower() == "true":
         payload["otp_code"] = otp_code
     return payload
 
@@ -1241,12 +1289,7 @@ async def api_forgot_password(request: Request, req: ForgotPasswordRequest):
 @app.get("/api/auth/me")
 async def api_me(authorization: Optional[str] = Header(default=None)):
     """Get current authenticated user info."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    token = authorization.split(" ")[1]
-
-    user_info = await supabase_auth_request("user", {}, method="GET")
+    user_info = await fetch_authenticated_user(authorization)
 
     return {
         "success": True,
@@ -1271,11 +1314,15 @@ async def api_refresh_token(refresh_token: str):
 
 
 @app.post("/api/auth/logout")
-async def api_logout(authorization: Optional[str] = None):
+async def api_logout(authorization: Optional[str] = Header(default=None)):
     """Logout user and invalidate session."""
     if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ")[1]
-        await supabase_auth_request("logout", {}, method="POST")
+        headers = get_supabase_headers()
+        headers["Authorization"] = authorization
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(f"{SUPABASE_URL}/auth/v1/logout", headers=headers)
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text or "Logout failed")
 
     return {"success": True, "message": "Logged out successfully"}
 
@@ -1536,7 +1583,7 @@ async def get_feed(limit: int = 20, offset: int = 0, x_user_id: Optional[str] = 
 @app.post("/api/admin/moderation/flag")
 async def flag_content_for_review(request: Request, req: ModerationRequest):
     """Process reported text or actions for automatic moderation review."""
-    verify_admin_request(request.headers.get("authorization"), x_role=request.headers.get("x-role"))
+    await require_admin_user(request.headers.get("authorization"))
     moderation = auto_flag_content(req.content, action=req.action)
     return {
         "success": True,
@@ -1566,8 +1613,23 @@ async def get_post(post_id: str, x_user_id: Optional[str] = Header(default=None)
 
 
 @app.delete("/api/posts/{post_id}")
-async def delete_post(post_id: str):
+async def delete_post(post_id: str, x_user_id: Optional[str] = Header(default=None)):
     """Delete a post."""
+    current_user_id = resolve_current_user_id(x_user_id)
+    if not SUPABASE_URL:
+        post = next((item for item in in_memory_posts if item["id"] == post_id), None)
+        if post is None:
+            raise HTTPException(status_code=404, detail="Post not found")
+        if post.get("user_id") != current_user_id:
+            raise HTTPException(status_code=403, detail="You can only delete your own posts")
+        in_memory_posts[:] = [item for item in in_memory_posts if item["id"] != post_id]
+        return {"success": True, "message": "Post deleted"}
+
+    result = await supabase_db_request("GET", "posts", query=f"?select=id,user_id&id=eq.{post_id}")
+    if not result:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if result[0].get("user_id") != current_user_id:
+        raise HTTPException(status_code=403, detail="You can only delete your own posts")
     query = f"?id=eq.{post_id}"
     await supabase_db_request("DELETE", "posts", query=query)
     return {"success": True, "message": "Post deleted"}

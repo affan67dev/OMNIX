@@ -5,10 +5,11 @@ import json
 import os
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from backend.auth_utils import require_admin_user
 from backend.services.admin_oob_auth import admin_oob_auth_service
 from backend.services.push_notifications import PushNotificationError, push_notification_service
 
@@ -74,7 +75,8 @@ async def admin_tablet_bootstrap(req: TabletBootstrapRequest):
 
 
 @router.post("/phone/respond")
-async def admin_phone_respond(req: PhoneDecisionRequest):
+async def admin_phone_respond(req: PhoneDecisionRequest, authorization: Optional[str] = Header(default=None)):
+    await require_admin_user(authorization)
     try:
         challenge = await admin_oob_auth_service.phone_decision(
             challenge_id=req.challenge_id,
@@ -95,7 +97,8 @@ async def admin_phone_respond(req: PhoneDecisionRequest):
 
 
 @router.post("/phone/biometric-approve")
-async def admin_phone_biometric_approve(req: BiometricApprovalRequest):
+async def admin_phone_biometric_approve(req: BiometricApprovalRequest, authorization: Optional[str] = Header(default=None)):
+    await require_admin_user(authorization)
     try:
         challenge = await admin_oob_auth_service.approve_with_biometric(
             challenge_id=req.challenge_id,
@@ -111,13 +114,13 @@ async def admin_phone_biometric_approve(req: BiometricApprovalRequest):
         "success": True,
         "challenge_id": challenge.challenge_id,
         "status": challenge.status,
-        "approval_token": challenge.approved_token,
         "approved_at": challenge.approved_at,
     }
 
 
 @router.get("/tablet/status/{challenge_id}")
-async def admin_tablet_status(challenge_id: str):
+async def admin_tablet_status(challenge_id: str, authorization: Optional[str] = Header(default=None)):
+    await require_admin_user(authorization)
     challenge = admin_oob_auth_service.get_challenge(challenge_id)
     if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")
@@ -127,13 +130,13 @@ async def admin_tablet_status(challenge_id: str):
         "challenge_id": challenge.challenge_id,
         "status": challenge.status,
         "message": "Authorized! Opening Admin Dashboard..." if challenge.status == "approved" else None,
-        "approval_token": challenge.approved_token,
         "expires_at": challenge.expires_at,
     }
 
 
 @router.get("/tablet/stream/{challenge_id}")
-async def admin_tablet_stream(challenge_id: str):
+async def admin_tablet_stream(challenge_id: str, authorization: Optional[str] = Header(default=None)):
+    await require_admin_user(authorization)
     challenge = admin_oob_auth_service.get_challenge(challenge_id)
     if challenge is None:
         raise HTTPException(status_code=404, detail="Challenge not found")

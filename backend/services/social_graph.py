@@ -216,6 +216,33 @@ class SocialGraphService:
             raise SocialGraphError(404, "User not found")
         return user
 
+    def ensure_user(self, user_id: str, username: str, display_name: str) -> Dict[str, Any]:
+        existing = self.users.get(user_id)
+        if existing is not None:
+            existing["username"] = username or existing.get("username") or user_id
+            existing["display_name"] = display_name or existing.get("display_name") or username or user_id
+            return deepcopy(existing)
+
+        profile = {
+            "id": user_id,
+            "username": username or f"user_{user_id[:8]}",
+            "display_name": display_name or username or "OMNIX User",
+            "bio": "",
+            "avatar_color": "#38bdf8",
+            "is_private": False,
+            "is_blocked_from_search": False,
+            "followers_count": 0,
+            "following_count": 0,
+            "posts_count": 0,
+            "followers_visible": True,
+            "following_visible": True,
+            "posts": [],
+            "stories": [],
+        }
+        self.users[user_id] = profile
+        self._refresh_follow_counts()
+        return deepcopy(profile)
+
     def _get_conversation(self, conversation_id: str) -> Dict[str, Any]:
         conversation = self.conversations.get(conversation_id)
         if conversation is None:

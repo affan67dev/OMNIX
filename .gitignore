@@ -1,5 +1,7 @@
 node_modules/
 .env
+.env.*
+!.env.example
 __pycache__/
 *.py[cod]
 *.pyo
@@ -8,3 +10,6 @@ __pycache__/
 /dist/
 coverage/
 *.log
+*.db
+api-credentials.json
+api-credentials.jso
