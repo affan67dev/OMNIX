@@ -17,3 +17,31 @@ android/app/build/
 android/build/
 *.keystore
 *.jks
+
+# Secrets & Credentials
+api-credentials.json
+api-credentials.jso
+*.key
+*.pem
+google-services.json
+key.properties
+firebase-config.json
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Build & Dist
+/build/
+/dist/
+.next/
+out/
