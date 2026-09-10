@@ -1,5 +1,8 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
 
+// Compatibility namespace only; this is never sent to the server and is not a user identity.
+export const CURRENT_USER_ID = 'authenticated-session';
+
 type RequestOptions = RequestInit & {
   query?: Record<string, string | number | boolean | undefined>;
 };
