@@ -1,7 +1,5 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
 
-export const CURRENT_USER_ID = 'local-user';
-
 type RequestOptions = RequestInit & {
   query?: Record<string, string | number | boolean | undefined>;
 };
@@ -16,12 +14,11 @@ export async function apiJson<T>(path: string, options: RequestOptions = {}): Pr
   });
 
   const headers = new Headers(options.headers ?? {});
-  headers.set('X-User-Id', CURRENT_USER_ID);
   let accessToken: string | null = null;
   try {
     accessToken = window.localStorage.getItem('access_token');
   } catch (error) {
-    console.error('Unable to read access token from local storage', error);
+    console.error('Unable to read access token', error);
   }
   if (accessToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${accessToken}`);
