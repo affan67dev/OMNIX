@@ -4,6 +4,7 @@ Production-ready FastAPI application with Supabase integration.
 """
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Header
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,7 +45,12 @@ app.include_router(zero_knowledge_router)
 app.include_router(admin_oob_auth_router)
 app.include_router(auth_v2_router)
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[os.getenv("GLOBAL_RATE_LIMIT", "120/minute")],
+    storage_uri=os.getenv("RATE_LIMIT_STORAGE_URI", "memory://"),
+    headers_enabled=True,
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -52,6 +58,18 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 @app.middleware("http")
 async def backend_request_guard(request: Request, call_next):
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    # Reject oversized API bodies before application/DB work. Direct-to-Storage media
+    # uploads should not traverse this API; JSON APIs are deliberately small.
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            body_size = int(content_length)
+        except ValueError:
+            body_size = 0
+        content_type = request.headers.get("content-type", "").lower()
+        max_body = 1 * 1024 * 1024 if "application/json" in content_type else 2 * 1024 * 1024
+        if body_size > max_body:
+            return JSONResponse(status_code=413, content={"success": False, "detail": "Request payload is too large", "request_id": request_id})
     request.state.request_id = request_id
     try:
         response = await call_next(request)
@@ -65,6 +83,11 @@ async def backend_request_guard(request: Request, call_next):
         )
     response.headers["X-Request-Id"] = request_id
     return response
+
+
+@app.exception_handler(RequestValidationError)
+async def app_validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"success": False, "detail": "Invalid request payload", "request_id": getattr(request.state, "request_id", None)})
 
 
 @app.exception_handler(HTTPException)

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiJson } from '../../utils/socialApi';
+import { prefetchMedia } from '../../utils/mediaCache';
 
 interface Post {
   id: string;
@@ -30,6 +31,8 @@ export function HomeFeed({ onInteraction }: { onInteraction: (type: string, tag:
   const [posting, setPosting] = useState(false);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [statusMessage, setStatusMessage] = useState('');
+  const [feedOffset, setFeedOffset] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const trackEvent = async (postId: string, interactionType: string, metadata: Record<string, unknown> = {}) => {
     await apiJson('/api/posts/' + postId + '/interactions', {
@@ -45,7 +48,7 @@ export function HomeFeed({ onInteraction }: { onInteraction: (type: string, tag:
     const loadPosts = async () => {
       try {
         const data = await apiJson<{ success: boolean; posts: Record<string, unknown>[] }>('/api/posts/feed', {
-          query: { limit: 20 },
+          query: { limit: 5, offset: 0 },
         });
         if (data?.success) {
           const mappedPosts = (data.posts ?? []).map((post: Record<string, unknown>) => ({
@@ -64,6 +67,8 @@ export function HomeFeed({ onInteraction }: { onInteraction: (type: string, tag:
             impression_count: typeof post.impression_count === 'number' ? post.impression_count : 0,
           }));
           setPosts(mappedPosts);
+          setFeedOffset(mappedPosts.length);
+          void prefetchMedia(mappedPosts.slice(0, 3).map((item) => item.image_url ?? '').filter(Boolean));
 
           for (const item of mappedPosts) {
             void trackEvent(item.id, 'impression', { source: 'home_feed' });
@@ -82,6 +87,35 @@ export function HomeFeed({ onInteraction }: { onInteraction: (type: string, tag:
 
     void loadPosts();
   }, []);
+
+  const loadMore = async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const data = await apiJson<{ success: boolean; posts: Record<string, unknown>[] }>('/api/posts/feed', { query: { limit: 5, offset: feedOffset } });
+      if (!data?.success) return;
+      const next = (data.posts ?? []).map((post: Record<string, unknown>) => ({
+        id: typeof post.id === 'string' ? post.id : `post-${String(post.content ?? Date.now())}`,
+        author: post.user_id ? `user_${String(post.user_id).slice(0, 6)}` : 'omni_user',
+        likes: typeof post.likes === 'number' ? post.likes : 0,
+        caption: typeof post.content === 'string' ? post.content : 'Shared from the private network',
+        tags: Array.isArray(post.tags) ? post.tags.filter((tag): tag is string => typeof tag === 'string') : [],
+        mentions: Array.isArray(post.mentions) ? post.mentions.filter((mention): mention is string => typeof mention === 'string') : [],
+        location: typeof post.location === 'string' ? post.location : 'Secure feed',
+        visibility: typeof post.visibility === 'string' ? post.visibility : 'public',
+        created_at: typeof post.created_at === 'string' ? post.created_at : undefined,
+        image_url: typeof post.image_url === 'string' ? post.image_url : null,
+        comments_count: typeof post.comments_count === 'number' ? post.comments_count : 0,
+        shares_count: typeof post.shares_count === 'number' ? post.shares_count : 0,
+        impression_count: typeof post.impression_count === 'number' ? post.impression_count : 0,
+      }));
+      setPosts((current) => [...current, ...next.filter((item) => !current.some((existing) => existing.id === item.id))]);
+      setFeedOffset((current) => current + next.length);
+      void prefetchMedia(next.slice(0, 3).map((item) => item.image_url ?? '').filter(Boolean));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const toggledPosts = useMemo(() => {
     return posts.filter((post) => {
@@ -290,6 +324,11 @@ export function HomeFeed({ onInteraction }: { onInteraction: (type: string, tag:
           </div>
         ))
       )}
+      {!loading && toggledPosts.length >= 5 ? (
+        <button type="button" onClick={() => void loadMore()} disabled={loadingMore} style={{ margin: '4px 14px 18px', width: 'calc(100% - 28px)', padding: '10px', borderRadius: '999px', border: '1px solid #334155', background: '#0f172a', color: '#f8fafc', cursor: loadingMore ? 'wait' : 'pointer' }}>
+          {loadingMore ? 'Loading…' : 'Load 5 more'}
+        </button>
+      ) : null}
     </div>
   );
 }
