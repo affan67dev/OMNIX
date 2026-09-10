@@ -81,20 +81,10 @@ async def _find_profile_by_phone(phone: str) -> dict | None:
     return await select_one("profiles", filters={"mobile": phone}, columns="id,user_id,username,mobile")
 
 
-async def _find_profile_by_username(username: str) -> dict | None:
-    normalized = username.strip().lower()
-    return await select_one("profiles", filters={"username": normalized}, columns="id,user_id,username,mobile")
-
-
 async def _ensure_supabase_user(phone: str, username: str) -> dict:
-    username = username.strip().lower()
-    existing_phone = await _find_profile_by_phone(phone)
-    if existing_phone:
-        return existing_phone
-
-    existing_username = await _find_profile_by_username(username)
-    if existing_username:
-        raise HTTPException(status_code=409, detail="Username is already taken")
+    existing = await _find_profile_by_phone(phone)
+    if existing:
+        return existing
 
     service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     supabase_url = os.getenv("SUPABASE_URL", "").rstrip("/")
@@ -118,23 +108,19 @@ async def _ensure_supabase_user(phone: str, username: str) -> dict:
 
     auth_user = response.json()
     user_id = auth_user["id"]
-    try:
-        return await upsert_one(
-            "profiles",
-            {"user_id": user_id, "username": username, "mobile": phone},
-            "user_id",
-        )
-    except RuntimeError as exc:
-        # PostgreSQL remains the final race-safe uniqueness authority.
-        if "profiles_username_ci_unique" in str(exc) or "duplicate key" in str(exc).lower():
-            raise HTTPException(status_code=409, detail="Username is already taken") from exc
-        raise
+    profile = await upsert_one(
+        "profiles",
+        {"user_id": user_id, "username": username, "mobile": phone},
+        "user_id",
+    )
+    return profile
 
 
 @router.post("/phone/request", status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("3/minute")
 async def request_phone_otp(request: Request, payload: PhoneRequest):
     phone = f"{payload.country_code}{payload.phone_number}"
+    # Only the newest challenge can be used. The OTP itself is never stored in plaintext.
     existing = await _find_profile_by_phone(phone)
     if payload.purpose == "signup" and existing:
         raise HTTPException(status_code=409, detail="Phone number is already registered")
@@ -207,6 +193,7 @@ async def verify_phone_otp(request: Request, payload: OTPVerifyRequest):
 @router.post("/logout")
 async def logout(request: Request):
     from backend.core.security import decode_access_token
+    from fastapi.security import HTTPAuthorizationCredentials
 
     authorization = request.headers.get("authorization", "")
     if not authorization.lower().startswith("bearer "):

@@ -2,183 +2,51 @@
 
 **Effective date:** 10 September 2026
 
-> **Important:** This is a transparent product-policy baseline, not a guarantee of legal compliance in every jurisdiction. Before launch, a qualified privacy lawyer should review the final policy, actual data flows, retention periods, processors, children's-data controls and cross-border transfer mechanisms. Replace all bracketed placeholders.
+This Privacy Policy explains how OMNIX processes personal information when you use its social, messaging, media, voice/video, and subscription features.
 
-## 1. Who controls your data
+## 1. Information we process
+Depending on the features you use, OMNIX may process account identifiers such as phone number, username and profile information; content you choose to upload or send; social relationships and interactions; device and push-notification information; security/session information; subscription and purchase verification information; and technical information such as IP address, timestamps, diagnostics and approximate network/device details.
 
-**Data controller/operator:** [LEGAL ENTITY / OWNER NAME]
+OMNIX should not collect information merely because it is technically available. We aim to collect information that is reasonably necessary for the requested feature, security, legal compliance, service operation, and legitimate product improvement.
 
-**Address:** [BUSINESS ADDRESS]
+## 2. How we use information
+We use information to create and authenticate accounts; provide profiles, feeds, follows, messaging and calls; deliver notifications; store and deliver user content; prevent abuse, fraud and security incidents; process subscriptions and payments; troubleshoot and improve reliability; measure engagement where appropriate; and comply with legal obligations.
 
-**Privacy contact:** [PRIVACY EMAIL]
+## 3. Legal bases and rights
+For users protected by the GDPR or similar laws, processing may rely on performance of a contract, consent, legitimate interests, legal obligations, or another lawful basis recognized by applicable law. Depending on jurisdiction, you may have rights to access, correct, delete, restrict, object to, or receive a portable copy of personal data, and to withdraw consent where consent is the legal basis. You may also have rights concerning automated decision-making and profiling where applicable.
 
-**Grievance contact:** [GRIEVANCE EMAIL]
+California residents may have additional rights under applicable California privacy law, including rights concerning access, correction, deletion, and certain disclosures about personal information. OMNIX will apply legally required exceptions and verification procedures.
 
-OMNIX is a social communication service that may provide profiles, social connections, posts, media, messaging, voice/video calls, notifications and paid features.
+## 4. User content and communications
+Content you create or share is processed to provide the requested service. Private does not mean that OMNIX can ignore lawful safety, security, abuse-prevention, or legal requirements. Where end-to-end encryption is offered, OMNIX may not be able to read encrypted message content, but metadata and information necessary to operate the service may still be processed.
 
-## 2. What information we process
+## 5. Sharing and service providers
+We may disclose information to infrastructure, hosting, storage, communications, analytics, payment, app-store, security, and other service providers acting on our instructions or as otherwise permitted by law. We may disclose information when required by law, to protect rights and safety, prevent fraud or abuse, or as part of a corporate transaction, subject to applicable legal protections.
 
-Depending on the features you use, OMNIX may process:
+We do not sell personal information merely as a condition of using OMNIX. Any jurisdiction-specific definition of sale, sharing, targeted advertising, or similar activity will be handled according to applicable law and disclosed where required.
 
-### Account and profile information
+## 6. International transfers
+OMNIX may operate across countries and may process information in countries different from your own. Where required, appropriate transfer mechanisms and safeguards will be used, such as adequacy decisions or recognized contractual safeguards.
 
-- phone number and country code;
-- username and display name;
-- profile photo, cover image, biography and profile settings;
-- account identifiers and authentication/session information.
+## 7. Retention
+We retain information for as long as reasonably necessary for the purpose for which it was collected, including account operation, security, dispute resolution, legal obligations, backups and legitimate business records. Retention periods vary by data category. When information is no longer required, we seek to delete or irreversibly anonymize it, subject to lawful exceptions.
 
-### Content
+## 8. Security
+OMNIX uses technical and organizational safeguards appropriate to the risks, including access controls, authentication controls, encryption where appropriate, logging, least-privilege service access, and security testing. No internet service can guarantee absolute security.
 
-- posts, captions, comments, likes, shares, bookmarks, mentions and hashtags;
-- photos, videos, documents and other uploaded media;
-- messages and message metadata;
-- voice messages and call-related information.
+## 9. Children and age requirements
+OMNIX is not intended for children who are below the minimum age permitted by applicable law. Where a jurisdiction requires a higher minimum age or parental consent, those requirements apply. If we learn that information was collected in violation of applicable child-privacy requirements, we will take appropriate steps.
 
-Where end-to-end encryption is enabled, OMNIX is designed to protect message content from server-side plaintext access. We may still process metadata and operational information needed to deliver and secure the service.
+## 10. Your choices
+You may manage available profile, privacy, notification, blocking, muting and account settings within OMNIX. You may request privacy rights through the official OMNIX privacy/contact channel. We may need to verify identity before fulfilling a request and may retain limited information where the law permits or requires it.
 
-### Device and technical information
+## 11. Cookies and similar technologies
+Web versions of OMNIX may use cookies, local storage, SDKs, or similar technologies for authentication, security, preferences, functionality and measurement. Where consent is required, non-essential technologies will be handled through an appropriate consent mechanism.
 
-We may process device identifiers, push-notification tokens, operating system/platform, app version, IP address, user-agent information, timestamps, authentication events, crash/error information and security signals.
+## 12. Changes
+We may update this Policy as the service or laws change. Material changes will receive legally required notice. The effective date at the top identifies the current version.
 
-### Subscription and transaction information
+## 13. Contact and complaints
+Use the official OMNIX privacy/contact channel for privacy requests or complaints. Where applicable, you may also contact your local data-protection authority or other competent regulator.
 
-For paid features, we may receive purchase identifiers, product identifiers, subscription state, expiry/renewal information, order identifiers and verification events from the relevant app store/payment provider. Payment-card details are normally handled by the payment provider rather than stored directly by OMNIX.
-
-### Reports and support
-
-If you contact support or report an account/content, we may process the information you submit, the affected account/content identifiers, moderation decisions and records needed to handle the issue.
-
-## 3. Why we use information
-
-We process information for purposes such as:
-
-1. creating and authenticating accounts;
-2. providing profiles, follows, posts, messaging, media, calls and notifications;
-3. storing and delivering content you choose to send or publish;
-4. securing accounts and preventing fraud, abuse, spam and unauthorized access;
-5. enforcing community rules and handling reports;
-6. verifying subscriptions and granting or removing premium entitlements;
-7. diagnosing errors, maintaining reliability and improving the service;
-8. complying with legal obligations and responding to valid legal requests; and
-9. protecting the rights, safety and security of users, OMNIX and others.
-
-We do not sell personal information as a business model.
-
-## 4. Legal basis and Indian privacy requirements
-
-Depending on the applicable law and context, processing may be based on consent, performance of a service requested by you, compliance with legal obligations, or another lawful basis recognized by applicable law.
-
-For users in India, OMNIX will design its privacy operations with applicable Indian privacy and intermediary requirements in mind, including the Digital Personal Data Protection framework and applicable Information Technology Rules. Requirements may change, so the operator will update its procedures and notices as laws and rules take effect.
-
-## 5. Public and private information
-
-Information you deliberately publish as public may be visible to other users or, depending on the feature, to people outside your account's immediate connections. Private-profile and private-messaging features restrict access according to their configured permissions and authorization rules.
-
-No online service can guarantee that another user will not copy, screenshot, photograph, record or redistribute information they can lawfully access on their device.
-
-## 6. Encryption and security
-
-OMNIX uses security controls intended to protect accounts and stored information, which may include HTTPS/TLS, access controls, hashed credentials/OTP data, session revocation, database authorization policies and cryptographic protections for supported encrypted features.
-
-Security is not absolute. Users should keep devices updated, protect account access and avoid sharing authentication codes.
-
-## 7. Who we share information with
-
-We may disclose or make information available to service providers that help operate OMNIX, such as:
-
-- cloud/database and storage providers;
-- push-notification providers;
-- telecommunications/SMS providers for authentication;
-- app stores and payment/subscription providers;
-- infrastructure, monitoring and security providers; and
-- professional advisers where reasonably necessary.
-
-These providers should receive only the information reasonably necessary for their service and are expected to protect it under their applicable agreements and obligations.
-
-We may also disclose information when required by law, valid legal process, court order, regulatory request, emergency involving safety, or to investigate security/fraud where legally permitted.
-
-## 8. International processing
-
-Some service providers may process information in countries outside your home country. Where required, OMNIX will use legally recognized safeguards for applicable international transfers.
-
-## 9. Retention
-
-We retain information only for as long as reasonably necessary for the purpose for which it was collected, account/service operation, security, dispute handling, legal obligations and legitimate records management.
-
-Typical categories may include:
-
-- account/profile data: while the account exists and for a limited period afterward when required for security or legal reasons;
-- authentication/session records: according to security and expiry requirements;
-- messages/content: according to the feature, user settings and deletion behavior, subject to backups, legal holds and technical limits;
-- purchase records: for accounting, fraud prevention, tax and legal requirements;
-- security/moderation records: for as long as reasonably necessary to enforce rules and resolve disputes.
-
-The operator should maintain an internal retention schedule that maps each production table and storage system to a defined retention period.
-
-## 10. Your choices and rights
-
-Subject to applicable law, you may have rights to access information, request correction, request deletion/erasure, withdraw consent where processing is consent-based, request information about processing, and raise grievances.
-
-Requests should be sent to **[PRIVACY EMAIL]** with enough information to verify the relevant account and protect against unauthorized requests.
-
-Some requests may be limited where retention is legally required or where fulfilling the request would compromise another person's rights, security, fraud prevention or legal obligations.
-
-## 11. Account deletion
-
-OMNIX will provide an account-deletion process where required by applicable law and platform rules. Deletion may not immediately erase information that must be retained for legal, security, fraud-prevention, dispute-resolution or backup purposes.
-
-If you delete content, copies may remain temporarily in backups or in another user's lawful possession, such as a message already delivered to their device.
-
-## 12. Children's privacy
-
-OMNIX will not knowingly process children's personal data in a way that violates applicable child-protection or privacy law. Where applicable law requires verified parental/guardian consent, age assurance or additional safeguards, those controls must be completed before the relevant processing occurs.
-
-Parents or guardians who believe a child's information has been collected improperly should contact **[PRIVACY EMAIL]** or **[GRIEVANCE EMAIL]**.
-
-## 13. Cookies and local storage
-
-Web or hybrid versions of OMNIX may use local storage, cookies or similar technologies for authentication, preferences, security and service operation. Any optional analytics or advertising technologies, if introduced, should be disclosed and controlled according to applicable law.
-
-## 14. Notifications
-
-If you enable push notifications, OMNIX may send event information to a notification provider so the provider can deliver the notification to your device. You can generally control notification permissions through your device settings.
-
-## 15. Voice/video calls
-
-Calls may require processing connection and technical metadata so participants can establish and maintain a call. Network infrastructure such as STUN/TURN or other relay services may process connection information. Call content should be protected according to the security architecture of the feature, but OMNIX cannot guarantee that a participant will not record a call using their device.
-
-## 16. Subscriptions
-
-Subscription providers may process purchase and account identifiers to complete payment, renewals, cancellations and refunds. OMNIX uses verification data to determine premium entitlement. Subscription terms, price, renewal frequency, cancellation and refund information will be shown before purchase and may also be governed by the applicable app-store rules.
-
-## 17. Security incidents
-
-If a security incident occurs, OMNIX will investigate, contain and remediate it and provide notices to affected users or authorities when required by applicable law.
-
-## 18. Changes to this Policy
-
-We may update this Privacy Policy when our processing changes or when law requires an update. We will provide reasonable notice for material changes. The effective date at the top identifies the current version.
-
-## 19. Grievance contact
-
-**Grievance Officer:** [NAME]
-
-**Email:** [GRIEVANCE EMAIL]
-
-**Address:** [ADDRESS]
-
-Complaints should include enough information to identify the account and issue. OMNIX will acknowledge and resolve grievances within timelines required by applicable law.
-
-## 20. Contact
-
-Privacy: **[PRIVACY EMAIL]**
-
-Support: **[SUPPORT EMAIL]**
-
-Legal/grievance: **[GRIEVANCE EMAIL]**
-
----
-
-### Operator launch checklist
-
-Before treating this policy as final, verify the real production data map against this document: database tables, object storage buckets, logs, backups, analytics, crash reporting, SMS, push, WebRTC/STUN/TURN, app-store billing, moderation tools, support systems and any future third-party integrations. Remove or add categories so the policy always matches actual processing.
+**Important:** This is a production-oriented privacy-policy draft, not a representation that OMNIX is legally compliant in every jurisdiction. Counsel should validate the final controller/operator identity, DPO or privacy contact where required, data inventory, processors, transfer mechanisms, retention schedule, cookie practices, children's rules, California disclosures, and regulator-specific requirements before launch.
