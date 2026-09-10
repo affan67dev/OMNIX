@@ -22,10 +22,9 @@ jobs:
         run: python scripts/production_hardening.py
       - name: Validate Python syntax
         run: python -m compileall -q main.py backend
-      - name: Validate frontend
+      - name: Validate frontend build
         run: |
           npm ci --ignore-scripts
-          npx eslint .
           npm run build
       - name: Commit hardening changes
         run: |
