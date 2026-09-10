@@ -8,11 +8,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.webkit.WebViewAssetLoader
+import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import com.omnix.billing.PlayBillingBridge
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.lang.ref.WeakReference
 import org.json.JSONObject
 
@@ -30,15 +28,11 @@ class MainActivity : AppCompatActivity() {
         private var pendingPushToken: String? = null
 
         fun cacheLaunchPayload(payloadJson: String?) {
-            if (!payloadJson.isNullOrBlank()) {
-                launchPayloadJson = payloadJson
-            }
+            if (!payloadJson.isNullOrBlank()) launchPayloadJson = payloadJson
         }
 
         fun cachePushToken(token: String?) {
-            if (!token.isNullOrBlank()) {
-                pendingPushToken = token
-            }
+            if (!token.isNullOrBlank()) pendingPushToken = token
         }
 
         fun dispatchToWeb(payloadJson: String) {
@@ -63,32 +57,35 @@ class MainActivity : AppCompatActivity() {
         webViewRef = WeakReference(webView)
         configureWebView()
 
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                cachePushToken(task.result)
-            }
-        }
+        initializeFirebaseMessagingSafely()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         val payload = buildLaunchPayload(intent)
-        if (!payload.isNullOrBlank()) {
-            dispatchToWeb(payload)
-        }
+        if (!payload.isNullOrBlank()) dispatchToWeb(payload)
     }
 
     fun peekLaunchPayload(): String? = launchPayloadJson
 
-    fun clearLaunchPayload() {
-        launchPayloadJson = null
-    }
+    fun clearLaunchPayload() { launchPayloadJson = null }
 
     fun peekPendingPushToken(): String? = pendingPushToken
 
-    fun clearPendingPushToken() {
-        pendingPushToken = null
+    fun clearPendingPushToken() { pendingPushToken = null }
+
+    private fun initializeFirebaseMessagingSafely() {
+        // Firebase is optional for local/debug builds. A missing google-services
+        // configuration must never prevent the core app/WebView from starting.
+        try {
+            if (FirebaseApp.getApps(this).isEmpty()) return
+            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                if (task.isSuccessful) cachePushToken(task.result)
+            }
+        } catch (_: Exception) {
+            // Push notifications are non-critical; keep the app usable without them.
+        }
     }
 
     private fun configureWebView() {
@@ -129,16 +126,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildLaunchPayload(intent: Intent?): String? {
-        if (intent == null) {
-            return null
-        }
+        if (intent == null) return null
         val targetScreen = intent.getStringExtra("targetScreen") ?: intent.data?.getQueryParameter("targetScreen")
         val conversationId = intent.getStringExtra("conversationId") ?: intent.data?.getQueryParameter("conversationId")
         val profileId = intent.getStringExtra("profileId") ?: intent.data?.getQueryParameter("profileId")
         val notificationType = intent.getStringExtra("notificationType") ?: intent.data?.getQueryParameter("notificationType")
-        if (targetScreen == null && conversationId == null && profileId == null) {
-            return null
-        }
+        if (targetScreen == null && conversationId == null && profileId == null) return null
         return JSONObject()
             .put("targetScreen", targetScreen)
             .put("conversationId", conversationId)
