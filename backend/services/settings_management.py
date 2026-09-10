@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from copy import deepcopy
+import hashlib
+import os
+import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from uuid import uuid4
 
-from backend.services.billing import billing_service
-from backend.services.social_graph import social_graph
+from backend.services.supabase_db import (
+    delete_many_sync,
+    insert_one_sync,
+    select_many_sync,
+    select_one_sync,
+    update_one_sync,
+    upsert_one_sync,
+)
 
 
 def utc_now() -> datetime:
@@ -25,528 +33,227 @@ class SettingsError(Exception):
 
 
 class SettingsManagementService:
-    PAUSE_DURATIONS = {
-        "15m": timedelta(minutes=15),
-        "1h": timedelta(hours=1),
-        "2h": timedelta(hours=2),
-        "4h": timedelta(hours=4),
-        "8h": timedelta(hours=8),
-    }
+    """Persistent settings service with no process-level user state."""
+
+    PAUSE_DURATIONS = {"15m": timedelta(minutes=15), "1h": timedelta(hours=1), "2h": timedelta(hours=2), "4h": timedelta(hours=4), "8h": timedelta(hours=8)}
     TAG_POLICIES = {"everyone", "people_you_follow", "no_one"}
     SENSITIVE_CONTENT_LEVELS = {"standard", "less", "more"}
     TWO_FA_METHODS = {"sms", "totp"}
 
-    def __init__(self) -> None:
-        self.accounts: Dict[str, Dict[str, Any]] = {
-            "local-user": {
-                "user_id": "local-user",
-                "email": "operator@omnix.app",
-                "phone_number": "+1-202-555-0112",
-                "gender": "non_binary",
-                "date_of_birth": "1997-09-14",
-                "account_created_date": "2024-02-19T12:00:00+00:00",
-                "first_username": "operator_zero",
-                "current_username": "operator_bite",
-                "account_status": "active",
-                "is_premium": False,
-                "subscription_expiry_date": None,
-                "subscription_status": "free",
-                "is_deactivated": False,
-                "deactivated_at": None,
-                "deletion_requested_at": None,
-                "deletion_scheduled_for": None,
-                "can_restore_until": None,
-            }
-        }
+    DEFAULTS = {
+        "account": {"account_status": "active", "is_deactivated": False, "deactivated_at": None, "deletion_requested_at": None, "deletion_scheduled_for": None, "can_restore_until": None},
+        "security": {"two_factor_enabled": False, "two_factor_method": None, "login_alerts_enabled": True, "unrecognized_device_alerts": True, "password_changed_at": None},
+        "content_preferences": {"sensitive_content_control": "standard", "hide_like_view_counts": False, "mention_policy": "people_you_follow", "tag_policy": "people_you_follow"},
+        "story_settings": {"auto_save_to_archive": True, "save_to_phone_gallery": False},
+        "storage_settings": {"cache_size_mb": 0, "cellular_data_saver": True, "photo_auto_download": "wifi_only", "video_auto_download": "wifi_only"},
+        "notification_settings": {"pause_all_until": None, "push_likes": True, "push_comments": True, "push_new_followers": True, "push_direct_messages": True, "push_calls": True, "push_app_updates": True},
+    }
 
-        self.security: Dict[str, Dict[str, Any]] = {
-            "local-user": {
-                "two_factor_enabled": True,
-                "two_factor_method": "totp",
-                "totp_secret_masked": "JBSW-Y3DP-XXXX",
-                "sms_2fa_phone": "+1-202-555-0112",
-                "login_alerts_enabled": True,
-                "unrecognized_device_alerts": True,
-                "password_changed_at": "2026-07-05T18:42:00+00:00",
-                "backup_codes_remaining": 6,
-            }
-        }
-
-        self.content_preferences: Dict[str, Dict[str, Any]] = {
-            "local-user": {
-                "sensitive_content_control": "standard",
-                "hide_like_view_counts": False,
-                "mention_policy": "people_you_follow",
-                "tag_policy": "people_you_follow",
-            }
-        }
-
-        self.story_settings: Dict[str, Dict[str, Any]] = {
-            "local-user": {
-                "auto_save_to_archive": True,
-                "save_to_phone_gallery": False,
-            }
-        }
-
-        self.storage_settings: Dict[str, Dict[str, Any]] = {
-            "local-user": {
-                "cache_size_mb": 286,
-                "cellular_data_saver": True,
-                "photo_auto_download": "wifi_only",
-                "video_auto_download": "wifi_only",
-            }
-        }
-
-        self.notification_settings: Dict[str, Dict[str, Any]] = {
-            "local-user": {
-                "pause_all_until": None,
-                "push_likes": True,
-                "push_comments": True,
-                "push_new_followers": True,
-                "push_direct_messages": True,
-                "push_calls": True,
-                "push_app_updates": True,
-            }
-        }
-
-        self.sessions: Dict[str, List[Dict[str, Any]]] = {
-            "local-user": [
-                {
-                    "id": "session-current",
-                    "device_name": "Pixel 9 Pro",
-                    "os": "Android 16",
-                    "location": "New York, US",
-                    "ip_address": "203.0.113.10",
-                    "last_active_at": "2026-07-21T09:12:00+00:00",
-                    "current": True,
-                    "recognized": True,
-                    "is_active": True,
-                },
-                {
-                    "id": "session-laptop",
-                    "device_name": "ThinkPad X1",
-                    "os": "Ubuntu 24.04",
-                    "location": "New York, US",
-                    "ip_address": "198.51.100.44",
-                    "last_active_at": "2026-07-20T22:41:00+00:00",
-                    "current": False,
-                    "recognized": True,
-                    "is_active": True,
-                },
-                {
-                    "id": "session-tablet",
-                    "device_name": "iPad Air",
-                    "os": "iPadOS 19",
-                    "location": "Unknown",
-                    "ip_address": "192.0.2.87",
-                    "last_active_at": "2026-07-19T17:03:00+00:00",
-                    "current": False,
-                    "recognized": False,
-                    "is_active": True,
-                },
-            ]
-        }
-
-        self.password_reset_challenges: Dict[str, Dict[str, Any]] = {}
-        self.data_export_requests: Dict[str, List[Dict[str, Any]]] = {
-            "local-user": []
-        }
-        self.archives: Dict[str, Dict[str, List[Dict[str, Any]]]] = {
-            "local-user": {
-                "posts": [
-                    {"id": "arch-post-1", "caption": "Launch retrospective archived.", "archived_at": "2026-06-11T11:21:00+00:00"},
-                    {"id": "arch-post-2", "caption": "Retention experiment snapshot.", "archived_at": "2026-07-03T07:50:00+00:00"},
-                ],
-                "stories": [
-                    {"id": "arch-story-1", "title": "Incident wrap-up", "archived_at": "2026-07-17T05:00:00+00:00"},
-                    {"id": "arch-story-2", "title": "Nightly build status", "archived_at": "2026-07-20T05:00:00+00:00"},
-                ],
-            }
-        }
-
-    def _ensure_user(self, user_id: str) -> None:
-        if user_id not in self.accounts:
+    def _ensure_user(self, user_id: str) -> str:
+        row = select_one_sync("profiles", filters={"user_id": user_id}, columns="user_id,username,full_name,bio,mobile,is_private,is_blocked_from_search,created_at,updated_at")
+        if not row:
             raise SettingsError(404, "Settings account not found")
+        return str(row["user_id"])
 
-    def _active_sessions(self, user_id: str) -> List[Dict[str, Any]]:
+    def _settings_row(self, user_id: str) -> Dict[str, Any]:
         self._ensure_user(user_id)
-        return [session for session in self.sessions.get(user_id, []) if session["is_active"]]
+        row = select_one_sync("user_settings", filters={"user_id": user_id}, columns="user_id,account,security,content_preferences,story_settings,storage_settings,notification_settings,updated_at")
+        if row:
+            return row
+        return upsert_one_sync("user_settings", {"user_id": user_id, **self.DEFAULTS, "updated_at": iso_now()}, "user_id")
+
+    def _category(self, user_id: str, category: str) -> Dict[str, Any]:
+        row = self._settings_row(user_id)
+        return {**self.DEFAULTS[category], **(row.get(category) or {})}
+
+    def _save_category(self, user_id: str, category: str, values: Dict[str, Any]) -> Dict[str, Any]:
+        self._ensure_user(user_id)
+        return upsert_one_sync("user_settings", {"user_id": user_id, category: values, "updated_at": iso_now()}, "user_id")
 
     def get_overview(self, user_id: str) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        premium = billing_service.get_subscription_summary(user_id)
-        account = deepcopy(self.accounts[user_id])
-        account["is_premium"] = premium["is_premium"]
-        account["subscription_expiry_date"] = premium["subscription_expiry_date"]
-        account["subscription_status"] = premium["subscription_status"]
-        return {
-            "account": account,
-            "security": deepcopy(self.security[user_id]),
-            "content_preferences": deepcopy(self.content_preferences[user_id]),
-            "story_settings": deepcopy(self.story_settings[user_id]),
-            "storage_settings": deepcopy(self.storage_settings[user_id]),
-            "notification_settings": deepcopy(self.notification_settings[user_id]),
-            "sessions": deepcopy(self._active_sessions(user_id)),
-            "archives": deepcopy(self.archives[user_id]),
-            "blocked_accounts": self.list_blocked_accounts(user_id),
-            "muted_accounts": self.list_muted_accounts(user_id),
-            "latest_export": deepcopy(self.data_export_requests[user_id][-1]) if self.data_export_requests[user_id] else None,
-            "premium": premium,
-        }
+        row = self._settings_row(user_id)
+        profile = select_one_sync("profiles", filters={"user_id": user_id}, columns="user_id,username,full_name,bio,mobile,is_private,is_blocked_from_search,created_at,updated_at,followers_count,following_count,posts_count,omni_score") or {}
+        subscription = select_one_sync("subscriptions", filters={"user_id": user_id}, columns="status,is_premium,expiry_at,renews_at") or {"status": "free", "is_premium": False, "expiry_at": None, "renews_at": None}
+        account = {**self.DEFAULTS["account"], **(row.get("account") or {})}
+        account.update({"user_id": user_id, "username": profile.get("username"), "email": None, "phone_number": profile.get("mobile"), "current_username": profile.get("username"), "account_created_date": profile.get("created_at"), "is_premium": bool(subscription.get("is_premium")), "subscription_expiry_date": subscription.get("expiry_at"), "subscription_status": subscription.get("status", "free")})
+        sessions = self.list_sessions(user_id)
+        return {"account": account, "security": self._category(user_id, "security"), "content_preferences": self._category(user_id, "content_preferences"), "story_settings": self._category(user_id, "story_settings"), "storage_settings": self._category(user_id, "storage_settings"), "notification_settings": self._category(user_id, "notification_settings"), "sessions": sessions, "archives": self.get_archives(user_id), "blocked_accounts": self.list_blocked_accounts(user_id), "muted_accounts": self.list_muted_accounts(user_id), "latest_export": next(iter(select_many_sync("data_export_requests", filters={"user_id": user_id}, columns="id,status,scope,download_path,expires_at,created_at,completed_at")), None), "premium": {"is_premium": bool(subscription.get("is_premium")), "subscription_expiry_date": subscription.get("expiry_at"), "subscription_status": subscription.get("status", "free")}}
 
-    def update_personal_information(
-        self,
-        user_id: str,
-        phone_number: str,
-        email: str,
-        gender: str,
-        date_of_birth: str,
-    ) -> Dict[str, Any]:
+    def update_personal_information(self, user_id: str, phone_number: str, email: str, gender: str, date_of_birth: str) -> Dict[str, Any]:
         self._ensure_user(user_id)
-        account = self.accounts[user_id]
-        account.update(
-            {
-                "phone_number": phone_number.strip(),
-                "email": email.strip().lower(),
-                "gender": gender.strip().lower(),
-                "date_of_birth": date_of_birth,
-            }
-        )
-        return deepcopy(account)
+        # Sensitive account metadata is kept in the user-owned settings row; auth email changes remain an Auth concern.
+        account = self._category(user_id, "account")
+        account.update({"phone_number": phone_number.strip(), "email": email.strip().lower(), "gender": gender.strip().lower(), "date_of_birth": date_of_birth})
+        row = self._save_category(user_id, "account", account)
+        return {**account, "user_id": user_id}
 
     def request_data_export(self, user_id: str, include_messages: bool, include_posts: bool, include_profile: bool) -> Dict[str, Any]:
         self._ensure_user(user_id)
-        export_request = {
-            "id": f"export-{uuid4().hex}",
-            "status": "queued",
-            "requested_at": iso_now(),
-            "download_url": None,
-            "expires_at": None,
-            "format": "zip",
-            "scope": {
-                "include_messages": include_messages,
-                "include_posts": include_posts,
-                "include_profile": include_profile,
-            },
-        }
-        # Local/dev fallback: immediately mark as ready.
-        export_request["status"] = "ready"
-        export_request["download_url"] = f"/api/settings/exports/{export_request['id']}/download"
-        export_request["expires_at"] = (utc_now() + timedelta(days=7)).isoformat()
-        self.data_export_requests[user_id].append(export_request)
-        return deepcopy(export_request)
+        expires = utc_now() + timedelta(days=7)
+        row = insert_one_sync("data_export_requests", {"user_id": user_id, "status": "ready", "scope": {"include_messages": include_messages, "include_posts": include_posts, "include_profile": include_profile}, "download_path": None, "expires_at": expires.isoformat(), "completed_at": iso_now()})
+        row["download_url"] = f"/api/settings/exports/{row['id']}/download"
+        return row
 
     def build_export_payload(self, user_id: str, export_id: str) -> Dict[str, Any]:
         self._ensure_user(user_id)
-        export_request = next((item for item in self.data_export_requests[user_id] if item["id"] == export_id), None)
-        if export_request is None:
+        request = select_one_sync("data_export_requests", filters={"id": export_id, "user_id": user_id}, columns="id,status,scope,expires_at")
+        if not request:
             raise SettingsError(404, "Export request not found")
-        if export_request["status"] != "ready":
+        if request.get("status") != "ready":
             raise SettingsError(409, "Export is not ready")
-        user_messages = []
-        for conversation in social_graph.list_conversations(user_id):
-            for message in conversation["messages"]:
-                user_messages.append(message)
-        payload = {
-            "account": deepcopy(self.accounts[user_id]),
-            "profile": deepcopy(social_graph.users.get(user_id, {})),
-            "posts": deepcopy(social_graph.users.get(user_id, {}).get("posts", [])),
-            "messages": user_messages,
-            "archives": deepcopy(self.archives[user_id]),
-            "generated_at": iso_now(),
-        }
+        if request.get("expires_at") and datetime.fromisoformat(str(request["expires_at"]).replace("Z", "+00:00")) <= utc_now():
+            raise SettingsError(410, "Export expired")
+        scope = request.get("scope") or {}
+        payload: Dict[str, Any] = {"generated_at": iso_now(), "scope": scope}
+        if scope.get("include_profile", True): payload["profile"] = select_one_sync("profiles", filters={"user_id": user_id}, columns="*")
+        if scope.get("include_posts", True): payload["posts"] = select_many_sync("posts", filters={"user_id": user_id}, columns="*")
+        if scope.get("include_messages", True):
+            memberships = select_many_sync("conversation_members", filters={"user_id": user_id}, columns="conversation_id,cleared_at")
+            payload["messages"] = []
+            for membership in memberships:
+                payload["messages"].extend(select_many_sync("messages", filters={"conversation_id": membership["conversation_id"]}, columns="id,conversation_id,sender_id,text_content,encrypted_payload,encryption_nonce,is_zero_knowledge,delivery_state,created_at"))
+        payload["archives"] = self.get_archives(user_id)
         return payload
 
     def deactivate_account(self, user_id: str, reason: str) -> Dict[str, Any]:
         self._ensure_user(user_id)
-        account = self.accounts[user_id]
-        account["is_deactivated"] = True
-        account["deactivated_at"] = iso_now()
-        account["account_status"] = "deactivated"
+        account = self._category(user_id, "account")
+        account.update({"is_deactivated": True, "deactivated_at": iso_now(), "account_status": "deactivated"})
+        self._save_category(user_id, "account", account)
         self.logout_all_other_sessions(user_id, keep_current_session=False)
-        return {
-            "account": deepcopy(account),
-            "message": f"Account deactivated: {reason.strip() or 'user_request'}",
-        }
+        return {"account": {**account, "user_id": user_id}, "message": f"Account deactivated: {reason.strip() or 'user_request'}"}
 
     def schedule_account_deletion(self, user_id: str, reason: str) -> Dict[str, Any]:
         self._ensure_user(user_id)
-        now = utc_now()
-        account = self.accounts[user_id]
-        account["deletion_requested_at"] = now.isoformat()
-        account["deletion_scheduled_for"] = (now + timedelta(days=30)).isoformat()
-        account["can_restore_until"] = account["deletion_scheduled_for"]
-        account["account_status"] = "pending_deletion"
-        self.logout_all_other_sessions(user_id, keep_current_session=False)
-        return deepcopy(account)
+        now = utc_now(); scheduled = (now + timedelta(days=30)).isoformat()
+        account = self._category(user_id, "account")
+        account.update({"deletion_requested_at": now.isoformat(), "deletion_scheduled_for": scheduled, "can_restore_until": scheduled, "account_status": "pending_deletion"})
+        self._save_category(user_id, "account", account); self.logout_all_other_sessions(user_id, keep_current_session=False)
+        return {**account, "user_id": user_id}
 
     def restore_account(self, user_id: str) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        account = self.accounts[user_id]
-        if not account["can_restore_until"]:
-            raise SettingsError(409, "Account is not pending deletion")
-        restore_until = datetime.fromisoformat(account["can_restore_until"])
-        if restore_until < utc_now():
-            raise SettingsError(410, "Restoration window expired")
-        account["is_deactivated"] = False
-        account["deactivated_at"] = None
-        account["deletion_requested_at"] = None
-        account["deletion_scheduled_for"] = None
-        account["can_restore_until"] = None
-        account["account_status"] = "active"
-        return deepcopy(account)
+        self._ensure_user(user_id); account = self._category(user_id, "account")
+        until = account.get("can_restore_until")
+        if not until: raise SettingsError(409, "Account is not pending deletion")
+        if datetime.fromisoformat(str(until).replace("Z", "+00:00")) < utc_now(): raise SettingsError(410, "Restoration window expired")
+        account.update({"is_deactivated": False, "deactivated_at": None, "deletion_requested_at": None, "deletion_scheduled_for": None, "can_restore_until": None, "account_status": "active"})
+        self._save_category(user_id, "account", account); return {**account, "user_id": user_id}
 
     def change_password(self, user_id: str, current_password: str, new_password: str) -> Dict[str, Any]:
         self._ensure_user(user_id)
-        if len(current_password.strip()) < 6 or len(new_password.strip()) < 8:
-            raise SettingsError(400, "Password policy not met")
-        security = self.security[user_id]
-        security["password_changed_at"] = iso_now()
-        return deepcopy(security)
+        if len(current_password.strip()) < 6 or len(new_password.strip()) < 8: raise SettingsError(400, "Password policy not met")
+        security = self._category(user_id, "security"); security["password_changed_at"] = iso_now(); self._save_category(user_id, "security", security); return security
 
     def request_password_reset(self, user_id: str, channel: str, destination: str) -> Dict[str, Any]:
         self._ensure_user(user_id)
-        if channel not in {"email", "sms"}:
-            raise SettingsError(400, "Unsupported reset channel")
-        challenge_id = f"otp-{uuid4().hex}"
-        challenge = {
-            "id": challenge_id,
-            "user_id": user_id,
-            "channel": channel,
-            "destination": destination,
-            "otp_code": "472901",
-            "expires_at": (utc_now() + timedelta(minutes=10)).isoformat(),
-            "verified": False,
-        }
-        self.password_reset_challenges[challenge_id] = challenge
-        return {
-            "challenge_id": challenge_id,
-            "channel": channel,
-            "destination_hint": destination[-4:].rjust(len(destination), "*") if destination else "",
-            "expires_at": challenge["expires_at"],
-        }
+        if channel not in {"email", "sms"}: raise SettingsError(400, "Unsupported reset channel")
+        challenge_id = str(uuid4()); otp = f"{secrets.randbelow(1_000_000):06d}"; expires = utc_now() + timedelta(minutes=10)
+        pepper = os.getenv("OTP_PEPPER", "settings-reset-pepper")
+        otp_hash = hashlib.sha256(f"{pepper}:{challenge_id}:{otp}".encode()).hexdigest()
+        insert_one_sync("settings_password_resets", {"id": challenge_id, "user_id": user_id, "channel": channel, "destination": destination, "otp_hash": otp_hash, "expires_at": expires.isoformat()})
+        result = {"challenge_id": challenge_id, "channel": channel, "destination_hint": destination[-4:].rjust(len(destination), "*") if destination else "", "expires_at": expires.isoformat()}
+        if os.getenv("ENVIRONMENT", "production").lower() != "production": result["development_otp"] = otp
+        return result
 
     def verify_password_reset(self, challenge_id: str, otp_code: str, new_password: str) -> Dict[str, Any]:
-        challenge = self.password_reset_challenges.get(challenge_id)
-        if challenge is None:
-            raise SettingsError(404, "Reset challenge not found")
-        if datetime.fromisoformat(challenge["expires_at"]) < utc_now():
-            raise SettingsError(410, "OTP expired")
-        if otp_code.strip() != challenge["otp_code"]:
-            raise SettingsError(400, "Invalid OTP code")
-        user_id = challenge["user_id"]
-        self.change_password(user_id, "temporary-reset", new_password)
-        challenge["verified"] = True
-        return {"success": True, "user_id": user_id}
+        challenge = select_one_sync("settings_password_resets", filters={"id": challenge_id}, columns="id,user_id,otp_hash,expires_at,verified_at,attempts")
+        if not challenge: raise SettingsError(404, "Reset challenge not found")
+        if challenge.get("verified_at"): raise SettingsError(400, "Reset challenge already used")
+        if datetime.fromisoformat(str(challenge["expires_at"]).replace("Z", "+00:00")) <= utc_now(): raise SettingsError(410, "OTP expired")
+        pepper = os.getenv("OTP_PEPPER", "settings-reset-pepper")
+        expected = hashlib.sha256(f"{pepper}:{challenge_id}:{otp_code.strip()}".encode()).hexdigest()
+        if not secrets.compare_digest(expected, str(challenge["otp_hash"])):
+            attempts = int(challenge.get("attempts") or 0) + 1; update_one_sync("settings_password_resets", filters={"id": challenge_id}, payload={"attempts": attempts}); raise SettingsError(400, "Invalid OTP code")
+        if len(new_password.strip()) < 8: raise SettingsError(400, "Password policy not met")
+        update_one_sync("settings_password_resets", filters={"id": challenge_id}, payload={"verified_at": iso_now()})
+        security = self._category(str(challenge["user_id"]), "security"); security["password_changed_at"] = iso_now(); self._save_category(str(challenge["user_id"]), "security", security)
+        return {"success": True, "user_id": challenge["user_id"]}
 
     def setup_2fa(self, user_id: str, method: str) -> Dict[str, Any]:
         self._ensure_user(user_id)
-        if method not in self.TWO_FA_METHODS:
-            raise SettingsError(400, "Unsupported 2FA method")
-        setup_id = f"2fa-{uuid4().hex}"
-        security = self.security[user_id]
-        security["pending_2fa_setup"] = {
-            "setup_id": setup_id,
-            "method": method,
-            "verification_code": "123456",
-            "created_at": iso_now(),
-        }
-        return {
-            "setup_id": setup_id,
-            "method": method,
-            "qr_code_url": f"otpauth://totp/OMNIX:{user_id}?secret=JBSWY3DPEHPK3PXP" if method == "totp" else None,
-            "phone_number": security.get("sms_2fa_phone") if method == "sms" else None,
-        }
+        if method not in self.TWO_FA_METHODS: raise SettingsError(400, "Unsupported 2FA method")
+        setup_id = str(uuid4()); verification_code = f"{secrets.randbelow(1_000_000):06d}"; pepper = os.getenv("OTP_PEPPER", "settings-2fa-pepper")
+        verification_hash = hashlib.sha256(f"{pepper}:{setup_id}:{verification_code}".encode()).hexdigest()
+        insert_one_sync("settings_2fa_challenges", {"id": setup_id, "user_id": user_id, "method": method, "verification_hash": verification_hash})
+        result = {"setup_id": setup_id, "method": method, "qr_code_url": None, "phone_number": None}
+        if method == "totp": result["qr_code_url"] = f"otpauth://totp/OMNIX:{user_id}?secret=SETUP_REQUIRED"
+        if method == "sms": result["phone_number"] = self._category(user_id, "account").get("phone_number")
+        if os.getenv("ENVIRONMENT", "production").lower() != "production": result["development_code"] = verification_code
+        return result
 
     def verify_2fa_setup(self, user_id: str, setup_id: str, code: str) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        security = self.security[user_id]
-        pending = security.get("pending_2fa_setup")
-        if not pending or pending.get("setup_id") != setup_id:
-            raise SettingsError(404, "2FA setup not found")
-        if pending["verification_code"] != code.strip():
-            raise SettingsError(400, "Invalid verification code")
-        security["two_factor_enabled"] = True
-        security["two_factor_method"] = pending["method"]
-        security.pop("pending_2fa_setup", None)
-        return deepcopy(security)
+        challenge = select_one_sync("settings_2fa_challenges", filters={"id": setup_id, "user_id": user_id}, columns="id,user_id,method,verification_hash,verified_at,expires_at")
+        if not challenge: raise SettingsError(404, "2FA setup not found")
+        pepper = os.getenv("OTP_PEPPER", "settings-2fa-pepper"); expected = hashlib.sha256(f"{pepper}:{setup_id}:{code.strip()}".encode()).hexdigest()
+        if not secrets.compare_digest(expected, str(challenge["verification_hash"])): raise SettingsError(400, "Invalid verification code")
+        update_one_sync("settings_2fa_challenges", filters={"id": setup_id}, payload={"verified_at": iso_now()})
+        security = self._category(user_id, "security"); security.update({"two_factor_enabled": True, "two_factor_method": challenge["method"]}); self._save_category(user_id, "security", security); return security
 
     def disable_2fa(self, user_id: str) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        security = self.security[user_id]
-        security["two_factor_enabled"] = False
-        security["two_factor_method"] = None
-        security.pop("pending_2fa_setup", None)
-        return deepcopy(security)
+        security = self._category(user_id, "security"); security.update({"two_factor_enabled": False, "two_factor_method": None}); self._save_category(user_id, "security", security); delete_many_sync("settings_2fa_challenges", filters={"user_id": user_id}); return security
 
     def list_sessions(self, user_id: str) -> List[Dict[str, Any]]:
-        return deepcopy(self._active_sessions(user_id))
+        self._ensure_user(user_id)
+        return select_many_sync("auth_sessions", filters={"user_id": user_id}, columns="id,user_id,created_at,expires_at,revoked_at,ip_address,user_agent")
 
     def logout_session(self, user_id: str, session_id: str) -> None:
-        sessions = self._active_sessions(user_id)
-        match = next((session for session in sessions if session["id"] == session_id), None)
-        if match is None:
-            raise SettingsError(404, "Session not found")
-        match["is_active"] = False
-        match["revoked_at"] = iso_now()
+        self._ensure_user(user_id)
+        row = select_one_sync("auth_sessions", filters={"id": session_id, "user_id": user_id}, columns="id")
+        if not row: raise SettingsError(404, "Session not found")
+        update_one_sync("auth_sessions", filters={"id": session_id, "user_id": user_id}, payload={"revoked_at": iso_now()})
 
     def logout_all_other_sessions(self, user_id: str, keep_current_session: bool = True) -> Dict[str, Any]:
-        revoked = 0
-        for session in self.sessions.get(user_id, []):
-            if not session["is_active"]:
-                continue
-            if keep_current_session and session.get("current"):
-                continue
-            session["is_active"] = False
-            session["revoked_at"] = iso_now()
-            revoked += 1
+        self._ensure_user(user_id); sessions = self.list_sessions(user_id); revoked = 0
+        for session in sessions:
+            if keep_current_session and session["id"] == sessions[0]["id"]: continue
+            if not session.get("revoked_at"):
+                update_one_sync("auth_sessions", filters={"id": session["id"], "user_id": user_id}, payload={"revoked_at": iso_now()}); revoked += 1
         return {"revoked_sessions": revoked}
 
     def update_alert_preferences(self, user_id: str, login_alerts_enabled: bool, unrecognized_device_alerts: bool) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        security = self.security[user_id]
-        security["login_alerts_enabled"] = login_alerts_enabled
-        security["unrecognized_device_alerts"] = unrecognized_device_alerts
-        return deepcopy(security)
+        security = self._category(user_id, "security"); security.update({"login_alerts_enabled": login_alerts_enabled, "unrecognized_device_alerts": unrecognized_device_alerts}); self._save_category(user_id, "security", security); return security
 
     def list_blocked_accounts(self, user_id: str) -> List[Dict[str, Any]]:
-        blocked = []
-        for (blocker_id, blocked_id), record in social_graph.blocked_users.items():
-            if blocker_id != user_id:
-                continue
-            target = social_graph.users.get(blocked_id)
-            if target is None:
-                continue
-            blocked.append({
-                "user_id": blocked_id,
-                "username": target["username"],
-                "display_name": target["display_name"],
-                "blocked_at": record["created_at"],
-            })
-        return blocked
+        rows = select_many_sync("blocks", filters={"blocker_id": user_id}, columns="blocked_id,created_at")
+        result = []
+        for row in rows:
+            try: profile = select_one_sync("profiles", filters={"user_id": row["blocked_id"]}, columns="user_id,username,full_name")
+            except Exception: profile = None
+            if profile: result.append({"user_id": profile["user_id"], "username": profile.get("username"), "display_name": profile.get("full_name") or profile.get("username"), "blocked_at": row.get("created_at")})
+        return result
 
     def list_muted_accounts(self, user_id: str) -> Dict[str, List[Dict[str, Any]]]:
+        rows = select_many_sync("mutes", filters={"muter_id": user_id}, columns="muted_id,created_at")
         grouped = {"posts": [], "stories": [], "chats": []}
-        for (muter_id, muted_id, mute_type), record in social_graph.muted_users.items():
-            if muter_id != user_id:
-                continue
-            target = social_graph.users.get(muted_id)
-            if target is None:
-                continue
-            payload = {
-                "user_id": muted_id,
-                "username": target["username"],
-                "display_name": target["display_name"],
-                "mute_type": mute_type,
-                "expires_at": record["expires_at"],
-            }
-            if mute_type == "posts":
-                grouped["posts"].append(payload)
-            elif mute_type == "stories":
-                grouped["stories"].append(payload)
-            else:
-                grouped["chats"].append(payload)
+        for row in rows:
+            profile = select_one_sync("profiles", filters={"user_id": row["muted_id"]}, columns="user_id,username,full_name")
+            if profile: grouped["chats"].append({"user_id": profile["user_id"], "username": profile.get("username"), "display_name": profile.get("full_name") or profile.get("username"), "mute_type": "user", "expires_at": None})
         return grouped
 
-    def update_content_preferences(
-        self,
-        user_id: str,
-        sensitive_content_control: str,
-        hide_like_view_counts: bool,
-        mention_policy: str,
-        tag_policy: str,
-    ) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        if sensitive_content_control not in self.SENSITIVE_CONTENT_LEVELS:
-            raise SettingsError(400, "Unsupported sensitive content level")
-        if mention_policy not in self.TAG_POLICIES or tag_policy not in self.TAG_POLICIES:
-            raise SettingsError(400, "Unsupported mention or tag policy")
-        settings = self.content_preferences[user_id]
-        settings.update(
-            {
-                "sensitive_content_control": sensitive_content_control,
-                "hide_like_view_counts": hide_like_view_counts,
-                "mention_policy": mention_policy,
-                "tag_policy": tag_policy,
-            }
-        )
-        return deepcopy(settings)
+    def update_content_preferences(self, user_id: str, sensitive_content_control: str, hide_like_view_counts: bool, mention_policy: str, tag_policy: str) -> Dict[str, Any]:
+        if sensitive_content_control not in self.SENSITIVE_CONTENT_LEVELS or mention_policy not in self.TAG_POLICIES or tag_policy not in self.TAG_POLICIES: raise SettingsError(400, "Unsupported content preference")
+        settings = self._category(user_id, "content_preferences"); settings.update({"sensitive_content_control": sensitive_content_control, "hide_like_view_counts": hide_like_view_counts, "mention_policy": mention_policy, "tag_policy": tag_policy}); self._save_category(user_id, "content_preferences", settings); return settings
 
     def get_archives(self, user_id: str) -> Dict[str, List[Dict[str, Any]]]:
-        self._ensure_user(user_id)
-        return deepcopy(self.archives[user_id])
+        rows = select_many_sync("archived_content", filters={"user_id": user_id}, columns="id,content_type,title,payload,archived_at")
+        return {"posts": [r for r in rows if r.get("content_type") == "post"], "stories": [r for r in rows if r.get("content_type") == "story"]}
 
     def update_story_settings(self, user_id: str, auto_save_to_archive: bool, save_to_phone_gallery: bool) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        settings = self.story_settings[user_id]
-        settings.update(
-            {
-                "auto_save_to_archive": auto_save_to_archive,
-                "save_to_phone_gallery": save_to_phone_gallery,
-            }
-        )
-        return deepcopy(settings)
+        settings = self._category(user_id, "story_settings"); settings.update({"auto_save_to_archive": auto_save_to_archive, "save_to_phone_gallery": save_to_phone_gallery}); self._save_category(user_id, "story_settings", settings); return settings
 
     def clear_cache(self, user_id: str) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        storage = self.storage_settings[user_id]
-        cleared = storage["cache_size_mb"]
-        storage["cache_size_mb"] = 0
-        return {"cleared_mb": cleared, "cache_size_mb": 0}
+        settings = self._category(user_id, "storage_settings"); cleared = int(settings.get("cache_size_mb") or 0); settings["cache_size_mb"] = 0; self._save_category(user_id, "storage_settings", settings); return {"cleared_mb": cleared, "cache_size_mb": 0}
 
-    def update_storage_settings(
-        self,
-        user_id: str,
-        cellular_data_saver: bool,
-        photo_auto_download: str,
-        video_auto_download: str,
-    ) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        if photo_auto_download not in {"wifi_only", "mobile_data"}:
-            raise SettingsError(400, "Unsupported photo auto-download setting")
-        if video_auto_download not in {"wifi_only", "mobile_data"}:
-            raise SettingsError(400, "Unsupported video auto-download setting")
-        settings = self.storage_settings[user_id]
-        settings.update(
-            {
-                "cellular_data_saver": cellular_data_saver,
-                "photo_auto_download": photo_auto_download,
-                "video_auto_download": video_auto_download,
-            }
-        )
-        return deepcopy(settings)
+    def update_storage_settings(self, user_id: str, cellular_data_saver: bool, photo_auto_download: str, video_auto_download: str) -> Dict[str, Any]:
+        if photo_auto_download not in {"wifi_only", "mobile_data"} or video_auto_download not in {"wifi_only", "mobile_data"}: raise SettingsError(400, "Unsupported auto-download setting")
+        settings = self._category(user_id, "storage_settings"); settings.update({"cellular_data_saver": cellular_data_saver, "photo_auto_download": photo_auto_download, "video_auto_download": video_auto_download}); self._save_category(user_id, "storage_settings", settings); return settings
 
-    def update_notification_preferences(
-        self,
-        user_id: str,
-        push_likes: bool,
-        push_comments: bool,
-        push_new_followers: bool,
-        push_direct_messages: bool,
-        push_calls: bool,
-        push_app_updates: bool,
-    ) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        settings = self.notification_settings[user_id]
-        settings.update(
-            {
-                "push_likes": push_likes,
-                "push_comments": push_comments,
-                "push_new_followers": push_new_followers,
-                "push_direct_messages": push_direct_messages,
-                "push_calls": push_calls,
-                "push_app_updates": push_app_updates,
-            }
-        )
-        return deepcopy(settings)
+    def update_notification_preferences(self, user_id: str, push_likes: bool, push_comments: bool, push_new_followers: bool, push_direct_messages: bool, push_calls: bool, push_app_updates: bool) -> Dict[str, Any]:
+        settings = self._category(user_id, "notification_settings"); settings.update({"push_likes": push_likes, "push_comments": push_comments, "push_new_followers": push_new_followers, "push_direct_messages": push_direct_messages, "push_calls": push_calls, "push_app_updates": push_app_updates}); self._save_category(user_id, "notification_settings", settings); return settings
 
     def pause_notifications(self, user_id: str, duration: str) -> Dict[str, Any]:
-        self._ensure_user(user_id)
-        if duration not in self.PAUSE_DURATIONS:
-            raise SettingsError(400, "Unsupported notification pause duration")
-        settings = self.notification_settings[user_id]
-        settings["pause_all_until"] = (utc_now() + self.PAUSE_DURATIONS[duration]).isoformat()
-        return deepcopy(settings)
+        if duration not in self.PAUSE_DURATIONS: raise SettingsError(400, "Unsupported notification pause duration")
+        settings = self._category(user_id, "notification_settings"); settings["pause_all_until"] = (utc_now() + self.PAUSE_DURATIONS[duration]).isoformat(); self._save_category(user_id, "notification_settings", settings); return settings
 
 
 settings_management = SettingsManagementService()
