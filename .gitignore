@@ -1,5 +1,7 @@
 node_modules/
 .env
+.env.*
+!.env.example
 __pycache__/
 *.py[cod]
 *.pyo
@@ -8,3 +10,10 @@ __pycache__/
 /dist/
 coverage/
 *.log
+.buildozer/
+android/.gradle/
+android/local.properties
+android/app/build/
+android/build/
+*.keystore
+*.jks
