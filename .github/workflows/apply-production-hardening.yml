@@ -22,8 +22,11 @@ jobs:
         run: python scripts/production_hardening.py
       - name: Validate Python syntax
         run: python -m compileall -q main.py backend
-      - name: Validate frontend package
-        run: npm ci --ignore-scripts && npm run lint && npm run build
+      - name: Validate frontend
+        run: |
+          npm ci --ignore-scripts
+          npx eslint .
+          npm run build
       - name: Commit hardening changes
         run: |
           git config user.name 'github-actions[bot]'
