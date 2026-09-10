@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
-from backend.routes.settings_management import resolve_current_user_id
+from backend.core.security import CurrentUser
 from backend.services.zero_knowledge import ZeroKnowledgeError, zero_knowledge_service
-
 
 router = APIRouter(prefix="/api/v1/security", tags=["Zero Knowledge Security"])
 
@@ -17,49 +16,53 @@ def raise_zero_knowledge_error(error: ZeroKnowledgeError) -> None:
 
 
 class PublicKeyBundleRequest(BaseModel):
-    algorithm: str
-    identity_public_key: str
-    prekey_public_key: str
-    prekey_key_id: str
-    device_id: Optional[str] = "primary-device"
+    algorithm: str = Field(min_length=3, max_length=64)
+    identity_public_key: str = Field(min_length=16, max_length=8192)
+    prekey_public_key: str = Field(min_length=16, max_length=8192)
+    prekey_key_id: str = Field(min_length=1, max_length=128)
+    device_id: str = Field(default="primary-device", min_length=1, max_length=128)
 
 
 class EncryptedVaultRequest(BaseModel):
-    encrypted_vault: str
-    vault_nonce: str
-    vault_salt: str
-    vault_version: int
-    recovery_hint: str
+    encrypted_vault: str = Field(min_length=1, max_length=2_000_000)
+    vault_nonce: str = Field(min_length=8, max_length=256)
+    vault_salt: str = Field(min_length=8, max_length=256)
+    vault_version: int = Field(gt=0, le=1000)
+    recovery_hint: str = Field(min_length=1, max_length=512)
 
 
 @router.put("/e2ee/key-bundle")
-async def upsert_e2ee_key_bundle(req: PublicKeyBundleRequest, x_user_id: Optional[str] = Header(default=None)):
-    user_id = resolve_current_user_id(x_user_id)
-    bundle = zero_knowledge_service.upsert_public_key_bundle(user_id, req.model_dump())
+async def upsert_e2ee_key_bundle(req: PublicKeyBundleRequest, current_user: CurrentUser):
+    try:
+        bundle = await zero_knowledge_service.upsert_public_key_bundle(current_user["sub"], req.model_dump())
+    except ZeroKnowledgeError as error:
+        raise_zero_knowledge_error(error)
     return {"success": True, "bundle": bundle}
 
 
 @router.get("/e2ee/key-bundle/{user_id}")
-async def get_e2ee_key_bundle(user_id: str):
+async def get_e2ee_key_bundle(user_id: str, current_user: CurrentUser):
+    # Public key bundles are intentionally readable to authenticated users; private vaults are not.
     try:
-        bundle = zero_knowledge_service.get_public_key_bundle(user_id)
+        bundle = await zero_knowledge_service.get_public_key_bundle(user_id)
     except ZeroKnowledgeError as error:
         raise_zero_knowledge_error(error)
     return {"success": True, "bundle": bundle}
 
 
 @router.put("/lock-vault")
-async def upsert_lock_vault(req: EncryptedVaultRequest, x_user_id: Optional[str] = Header(default=None)):
-    user_id = resolve_current_user_id(x_user_id)
-    vault = zero_knowledge_service.upsert_encrypted_vault(user_id, req.model_dump())
+async def upsert_lock_vault(req: EncryptedVaultRequest, current_user: CurrentUser):
+    try:
+        vault = await zero_knowledge_service.upsert_encrypted_vault(current_user["sub"], req.model_dump())
+    except ZeroKnowledgeError as error:
+        raise_zero_knowledge_error(error)
     return {"success": True, "vault": vault}
 
 
 @router.get("/lock-vault")
-async def get_lock_vault(x_user_id: Optional[str] = Header(default=None)):
-    user_id = resolve_current_user_id(x_user_id)
+async def get_lock_vault(current_user: CurrentUser):
     try:
-        vault = zero_knowledge_service.get_encrypted_vault(user_id)
+        vault = await zero_knowledge_service.get_encrypted_vault(current_user["sub"])
     except ZeroKnowledgeError as error:
         raise_zero_knowledge_error(error)
     return {"success": True, "vault": vault}
