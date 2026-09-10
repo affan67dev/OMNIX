@@ -11,6 +11,11 @@ jobs:
   lint-test-build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # Test-only deterministic secrets; production secrets stay in the deployment environment.
+      JWT_SECRET: ci-only-jwt-secret-012345678901234567890123456789
+      OTP_PEPPER: ci-only-otp-pepper-012345678901234567890123456789
+      ENVIRONMENT: test
 
     steps:
       - name: Checkout
