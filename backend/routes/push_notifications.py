@@ -1,20 +1,21 @@
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
+from backend.core.security import CurrentUser
 from backend.services.push_notifications import PushNotificationError, push_notification_service
-from backend.services.social_graph import social_graph
-
 
 router = APIRouter(prefix="/api/v1/push", tags=["Push Notifications"])
 
 
-def resolve_current_user_id(x_user_id: Optional[str]) -> str:
-    candidate = (x_user_id or "local-user").strip() or "local-user"
-    return candidate if candidate in social_graph.users else "local-user"
+def require_internal_service_key(value: Optional[str]) -> None:
+    expected = os.getenv("INTERNAL_SERVICE_KEY", "")
+    if not expected or value != expected:
+        raise HTTPException(status_code=403, detail="Internal service authorization required")
 
 
 def raise_push_error(error: PushNotificationError) -> None:
@@ -50,14 +51,19 @@ class SocialEventPushRequest(BaseModel):
 
 
 @router.post("/register-device")
-async def register_device(req: RegisterDeviceRequest, x_user_id: Optional[str] = Header(default=None)):
-    user_id = resolve_current_user_id(x_user_id)
-    device = push_notification_service.register_device(user_id, req.fcm_token, req.platform, req.device_id, req.app_version)
+async def register_device(req: RegisterDeviceRequest, current_user: CurrentUser):
+    try:
+        device = await push_notification_service.register_device(
+            str(current_user["sub"]), req.fcm_token, req.platform, req.device_id, req.app_version
+        )
+    except PushNotificationError as error:
+        raise_push_error(error)
     return {"success": True, "device": device}
 
 
 @router.post("/send/direct-message")
-async def send_direct_message_push(req: DirectMessagePushRequest):
+async def send_direct_message_push(req: DirectMessagePushRequest, x_internal_service_key: Optional[str] = Header(default=None)):
+    require_internal_service_key(x_internal_service_key)
     try:
         result = await push_notification_service.send_direct_message(req.recipient_user_id, req.conversation_id, req.sender_name, req.preview_text)
     except PushNotificationError as error:
@@ -66,7 +72,8 @@ async def send_direct_message_push(req: DirectMessagePushRequest):
 
 
 @router.post("/send/incoming-call")
-async def send_incoming_call_push(req: IncomingCallPushRequest):
+async def send_incoming_call_push(req: IncomingCallPushRequest, x_internal_service_key: Optional[str] = Header(default=None)):
+    require_internal_service_key(x_internal_service_key)
     try:
         result = await push_notification_service.send_incoming_call(req.recipient_user_id, req.caller_name, req.call_type, req.conversation_id)
     except PushNotificationError as error:
@@ -75,7 +82,8 @@ async def send_incoming_call_push(req: IncomingCallPushRequest):
 
 
 @router.post("/send/social-event")
-async def send_social_event_push(req: SocialEventPushRequest):
+async def send_social_event_push(req: SocialEventPushRequest, x_internal_service_key: Optional[str] = Header(default=None)):
+    require_internal_service_key(x_internal_service_key)
     try:
         result = await push_notification_service.send_social_event(req.recipient_user_id, req.actor_name, req.event_name, req.profile_id)
     except PushNotificationError as error:
