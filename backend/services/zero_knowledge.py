@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-
-def iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+from backend.services.supabase_db import select_one, upsert_one
 
 
 class ZeroKnowledgeError(Exception):
@@ -17,55 +14,45 @@ class ZeroKnowledgeError(Exception):
 
 
 class ZeroKnowledgeService:
-    def __init__(self) -> None:
-        self.public_key_bundles: Dict[str, Dict[str, Any]] = {}
-        self.encrypted_vaults: Dict[str, Dict[str, Any]] = {}
-
-    def upsert_public_key_bundle(self, user_id: str, bundle: Dict[str, Any]) -> Dict[str, Any]:
-        required = {"algorithm", "identity_public_key", "prekey_public_key", "prekey_key_id"}
+    async def upsert_public_key_bundle(self, user_id: str, bundle: Dict[str, Any]) -> Dict[str, Any]:
+        required = {"algorithm", "identity_public_key", "prekey_public_key", "prekey_key_id", "device_id"}
         missing = required.difference(bundle.keys())
         if missing:
             raise ZeroKnowledgeError(400, f"Missing public key bundle fields: {', '.join(sorted(missing))}")
-        stored = {
-            "user_id": user_id,
-            "algorithm": bundle["algorithm"],
-            "identity_public_key": bundle["identity_public_key"],
-            "prekey_public_key": bundle["prekey_public_key"],
-            "prekey_key_id": bundle["prekey_key_id"],
-            "device_id": bundle.get("device_id", "primary-device"),
-            "updated_at": iso_now(),
-        }
-        self.public_key_bundles[user_id] = stored
-        return deepcopy(stored)
+        try:
+            row = await upsert_one("zk_key_bundles", {"user_id": user_id, **bundle}, "user_id,device_id")
+            return deepcopy(row)
+        except Exception as exc:
+            raise ZeroKnowledgeError(503, "Unable to persist key bundle") from exc
 
-    def get_public_key_bundle(self, user_id: str) -> Dict[str, Any]:
-        bundle = self.public_key_bundles.get(user_id)
-        if bundle is None:
+    async def get_public_key_bundle(self, user_id: str) -> Dict[str, Any]:
+        try:
+            row = await select_one("zk_key_bundles", filters={"user_id": user_id}, columns="user_id,device_id,algorithm,identity_public_key,prekey_public_key,prekey_key_id,updated_at")
+        except Exception as exc:
+            raise ZeroKnowledgeError(503, "Unable to read key bundle") from exc
+        if row is None:
             raise ZeroKnowledgeError(404, "Public key bundle not found")
-        return deepcopy(bundle)
+        return deepcopy(row)
 
-    def upsert_encrypted_vault(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def upsert_encrypted_vault(self, user_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         required = {"encrypted_vault", "vault_nonce", "vault_salt", "vault_version", "recovery_hint"}
         missing = required.difference(payload.keys())
         if missing:
             raise ZeroKnowledgeError(400, f"Missing encrypted vault fields: {', '.join(sorted(missing))}")
-        stored = {
-            "user_id": user_id,
-            "encrypted_vault": payload["encrypted_vault"],
-            "vault_nonce": payload["vault_nonce"],
-            "vault_salt": payload["vault_salt"],
-            "vault_version": payload["vault_version"],
-            "recovery_hint": payload["recovery_hint"],
-            "updated_at": iso_now(),
-        }
-        self.encrypted_vaults[user_id] = stored
-        return deepcopy(stored)
+        try:
+            row = await upsert_one("encrypted_vaults", {"user_id": user_id, **payload}, "user_id")
+            return deepcopy(row)
+        except Exception as exc:
+            raise ZeroKnowledgeError(503, "Unable to persist encrypted vault") from exc
 
-    def get_encrypted_vault(self, user_id: str) -> Dict[str, Any]:
-        vault = self.encrypted_vaults.get(user_id)
-        if vault is None:
+    async def get_encrypted_vault(self, user_id: str) -> Dict[str, Any]:
+        try:
+            row = await select_one("encrypted_vaults", filters={"user_id": user_id}, columns="user_id,encrypted_vault,vault_nonce,vault_salt,vault_version,recovery_hint,updated_at")
+        except Exception as exc:
+            raise ZeroKnowledgeError(503, "Unable to read encrypted vault") from exc
+        if row is None:
             raise ZeroKnowledgeError(404, "Encrypted vault not found")
-        return deepcopy(vault)
+        return deepcopy(row)
 
 
 zero_knowledge_service = ZeroKnowledgeService()
