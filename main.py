@@ -8,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 import asyncio
 import json
 import os
@@ -29,6 +29,7 @@ from backend.services.push_notifications import PushNotificationError, push_noti
 from backend.routes.zero_knowledge import router as zero_knowledge_router
 from backend.routes.admin_oob_auth import router as admin_oob_auth_router
 from backend.routes.auth_v2 import router as auth_v2_router
+from backend.core.security import hash_otp, verify_otp_hash
 
 app = FastAPI(
     title="OMNIX",
@@ -83,6 +84,66 @@ async def backend_request_guard(request: Request, call_next):
         )
     response.headers["X-Request-Id"] = request_id
     return response
+
+
+PUBLIC_API_PATHS = {
+    "/api/auth/login",
+    "/api/auth/signup",
+    "/api/auth/otp/send",
+    "/api/auth/otp/verify",
+    "/api/auth/availability",
+    "/api/auth/forgot-password",
+    "/api/auth/refresh",
+    "/api/auth/google",
+    "/api/health",
+}
+
+
+async def _validate_supabase_access_token(token: str) -> str:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise HTTPException(status_code=503, detail="Authentication service is not configured")
+    if not token or len(token) > 8192:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{SUPABASE_URL}/auth/v1/user",
+                headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Authentication service unavailable") from exc
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired access token")
+    try:
+        user = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Invalid authentication response") from exc
+    user_id = user.get("id") if isinstance(user, dict) else None
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid access token")
+    return str(user_id)
+
+
+@app.middleware("http")
+async def authenticated_api_guard(request: Request, call_next):
+    path = request.url.path
+    if request.method == "OPTIONS" or not path.startswith("/api/"):
+        return await call_next(request)
+    if path in PUBLIC_API_PATHS or path.startswith("/api/admin-auth/"):
+        return await call_next(request)
+
+    authorization = request.headers.get("authorization", "")
+    if not authorization.lower().startswith("bearer "):
+        return JSONResponse(status_code=401, content={"success": False, "detail": "Authentication required", "request_id": getattr(request.state, "request_id", None)})
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        user_id = await _validate_supabase_access_token(token)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"success": False, "detail": exc.detail, "request_id": getattr(request.state, "request_id", None)})
+
+    # Legacy handlers consume x-user-id; overwrite it from the server-validated token.
+    request.scope["headers"] = [(key, value) for key, value in request.scope.get("headers", []) if key.lower() != b"x-user-id"] + [(b"x-user-id", user_id.encode("utf-8"))]
+    return await call_next(request)
 
 
 @app.exception_handler(RequestValidationError)
@@ -166,6 +227,22 @@ async def supabase_auth_request(endpoint: str, payload: dict, method: str = "POS
             raise HTTPException(status_code=response.status_code, detail=detail)
 
         return response.json()
+
+
+async def supabase_auth_user_request(access_token: str) -> dict:
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise HTTPException(status_code=503, detail="Supabase configuration missing")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {access_token}"},
+        )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=401, detail="Invalid or expired access token")
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="Invalid authentication response") from exc
 
 
 async def supabase_db_request(method: str, table: str, payload: dict = None, query: str = "") -> dict:
@@ -357,11 +434,19 @@ class AvailabilityRequest(BaseModel):
 
 
 class PostRequest(BaseModel):
-    content: str
-    image_url: Optional[str] = None
-    visibility: Optional[str] = 'public'
-    location: Optional[str] = 'Secure feed'
-    tags: Optional[List[str]] = []
+    content: str = Field(min_length=1, max_length=5000)
+    image_url: Optional[str] = Field(default=None, max_length=2048)
+    visibility: str = Field(default='public', pattern='^(public|followers|private)$')
+    location: str = Field(default='Secure feed', max_length=200)
+    tags: List[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Content cannot be empty")
+        return value
 
 
 class PostInteractionRequest(BaseModel):
@@ -1165,8 +1250,10 @@ async def api_send_signup_otp(request: Request, req: OtpSendRequest):
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
     otp_challenges[challenge_id] = {
         "phone": phone,
-        "otp_code": otp_code,
+        "otp_hash": hash_otp(challenge_id, otp_code),
         "verified": False,
+        "attempts": 0,
+        "max_attempts": 5,
         "expires_at": expires_at,
     }
 
@@ -1176,7 +1263,7 @@ async def api_send_signup_otp(request: Request, req: OtpSendRequest):
         "expires_at": expires_at.isoformat(),
         "message": "OTP sent successfully",
     }
-    if os.getenv("EXPOSE_DEV_OTP", "true").lower() == "true":
+    if os.getenv("EXPOSE_DEV_OTP", "false").lower() == "true" and os.getenv("ENVIRONMENT", "production").lower() != "production":
         payload["otp_code"] = otp_code
     return payload
 
@@ -1191,8 +1278,10 @@ async def api_verify_signup_otp(request: Request, req: OtpVerifyRequest):
 
     if not re.match(r"^\d{6}$", req.otp_code or ""):
         raise HTTPException(status_code=400, detail="Enter a valid 6-digit OTP")
-
-    if challenge["otp_code"] != req.otp_code:
+    if int(challenge.get("attempts", 0)) >= int(challenge.get("max_attempts", 5)):
+        raise HTTPException(status_code=429, detail="Too many OTP attempts")
+    if not verify_otp_hash(req.challenge_id, req.otp_code, challenge.get("otp_hash", "")):
+        challenge["attempts"] = int(challenge.get("attempts", 0)) + 1
         raise HTTPException(status_code=400, detail="Incorrect OTP code")
 
     challenge["verified"] = True
@@ -1246,8 +1335,10 @@ async def api_forgot_password(request: Request, req: ForgotPasswordRequest):
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
     otp_challenges[challenge_id] = {
         "phone": phone,
-        "otp_code": otp_code,
+        "otp_hash": hash_otp(challenge_id, otp_code),
         "verified": False,
+        "attempts": 0,
+        "max_attempts": 5,
         "expires_at": expires_at,
         "purpose": "password_reset",
     }
@@ -1258,7 +1349,7 @@ async def api_forgot_password(request: Request, req: ForgotPasswordRequest):
         "expires_at": expires_at.isoformat(),
         "message": "Password reset OTP sent successfully.",
     }
-    if os.getenv("EXPOSE_DEV_OTP", "true").lower() == "true":
+    if os.getenv("EXPOSE_DEV_OTP", "false").lower() == "true" and os.getenv("ENVIRONMENT", "production").lower() != "production":
         payload["otp_code"] = otp_code
     return payload
 
@@ -1269,9 +1360,10 @@ async def api_me(authorization: Optional[str] = Header(default=None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    token = authorization.split(" ")[1]
-
-    user_info = await supabase_auth_request("user", {}, method="GET")
+    token = authorization.split(" ", 1)[1].strip()
+    user_id = await _validate_supabase_access_token(token)
+    user_info = await supabase_auth_user_request(token)
+    user_info.setdefault("id", user_id)
 
     return {
         "success": True,
@@ -1296,12 +1388,23 @@ async def api_refresh_token(refresh_token: str):
 
 
 @app.post("/api/auth/logout")
-async def api_logout(authorization: Optional[str] = None):
-    """Logout user and invalidate session."""
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ")[1]
-        await supabase_auth_request("logout", {}, method="POST")
-
+async def api_logout(request: Request):
+    """Logout the authenticated Supabase session."""
+    authorization = request.headers.get("authorization", "")
+    if not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.split(" ", 1)[1].strip()
+    await _validate_supabase_access_token(token)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{SUPABASE_URL}/auth/v1/logout",
+                headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"},
+            )
+        if response.status_code >= 400:
+            raise HTTPException(status_code=502, detail="Logout failed")
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Authentication service unavailable") from exc
     return {"success": True, "message": "Logged out successfully"}
 
 
@@ -1515,12 +1618,14 @@ async def create_post(req: PostRequest, authorization: Optional[str] = None, x_u
         add_admin_log("INFO", f"Post {created['id']} created")
         return {"success": True, "message": "Post created successfully", "data": created, "moderation": moderation}
 
+    current_user_id = resolve_current_user_id(x_user_id)
     data = {
-        "content": req.content,
+        "content": req.content.strip(),
         "image_url": req.image_url,
         "visibility": req.visibility,
         "location": req.location,
         "tags": req.tags or [],
+        "user_id": current_user_id,
     }
     result = await supabase_db_request("POST", "posts", data)
     return {
@@ -1591,10 +1696,15 @@ async def get_post(post_id: str, x_user_id: Optional[str] = Header(default=None)
 
 
 @app.delete("/api/posts/{post_id}")
-async def delete_post(post_id: str):
-    """Delete a post."""
-    query = f"?id=eq.{post_id}"
-    await supabase_db_request("DELETE", "posts", query=query)
+async def delete_post(post_id: str, x_user_id: Optional[str] = Header(default=None)):
+    """Delete only a post owned by the authenticated user."""
+    current_user_id = resolve_current_user_id(x_user_id)
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", post_id or ""):
+        raise HTTPException(status_code=400, detail="Invalid post id")
+    query = f"?id=eq.{post_id}&user_id=eq.{current_user_id}"
+    result = await supabase_db_request("DELETE", "posts", query=query)
+    if not result:
+        raise HTTPException(status_code=404, detail="Post not found")
     return {"success": True, "message": "Post deleted"}
 
 
