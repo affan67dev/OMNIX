@@ -35,6 +35,8 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm run build
+      - name: Remove stale broken gitlink
+        run: git rm -r --cached --ignore-unmatch .buildozer/android/platform/python-for-android || true
       - name: Commit hardening changes
         run: |
           git config user.name 'github-actions[bot]'
