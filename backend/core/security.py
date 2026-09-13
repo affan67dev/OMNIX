@@ -16,11 +16,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from backend.services.supabase_db import select_one
 
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-JWT_SECRET = os.getenv("JWT_SECRET", "")
 JWT_TTL_MINUTES = int(os.getenv("JWT_TTL_MINUTES", "60"))
-OTP_PEPPER = os.getenv("OTP_PEPPER", "")
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -32,9 +28,11 @@ def _require_secret(value: str, name: str) -> str:
 
 
 def create_access_token(user_id: str, phone: str, username: str) -> tuple[str, str, datetime]:
-    secret = _require_secret(JWT_SECRET, "JWT_SECRET")
+    secret = _require_secret(os.getenv("JWT_SECRET", ""), "JWT_SECRET")
+    algorithm = os.getenv("JWT_ALGORITHM", JWT_ALGORITHM)
+    ttl_minutes = int(os.getenv("JWT_TTL_MINUTES", str(JWT_TTL_MINUTES)))
     now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(minutes=JWT_TTL_MINUTES)
+    expires_at = now + timedelta(minutes=ttl_minutes)
     jti = uuid4().hex
     payload = {
         "sub": str(user_id),
@@ -45,13 +43,14 @@ def create_access_token(user_id: str, phone: str, username: str) -> tuple[str, s
         "exp": int(expires_at.timestamp()),
         "type": "access",
     }
-    return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM), jti, expires_at
+    return jwt.encode(payload, secret, algorithm=algorithm), jti, expires_at
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    secret = _require_secret(JWT_SECRET, "JWT_SECRET")
+    secret = _require_secret(os.getenv("JWT_SECRET", ""), "JWT_SECRET")
+    algorithm = os.getenv("JWT_ALGORITHM", JWT_ALGORITHM)
     try:
-        payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM], options={"require": ["sub", "jti", "iat", "exp", "type"]})
+        payload = jwt.decode(token, secret, algorithms=[algorithm], options={"require": ["sub", "jti", "iat", "exp", "type"]})
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired access token") from exc
     if payload.get("type") != "access":
@@ -60,15 +59,17 @@ def decode_access_token(token: str) -> dict[str, Any]:
 
 
 async def _validate_supabase_token(token: str) -> dict[str, Any]:
-    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    supabase_url = os.getenv("SUPABASE_URL", "").rstrip("/")
+    anon_key = os.getenv("SUPABASE_ANON_KEY", "") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
+    if not supabase_url or not anon_key:
         raise HTTPException(status_code=503, detail="Authentication service is not configured")
     if not token or len(token) > 8192:
         raise HTTPException(status_code=401, detail="Invalid access token")
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
-                f"{SUPABASE_URL}/auth/v1/user",
-                headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"},
+                f"{supabase_url}/auth/v1/user",
+                headers={"apikey": anon_key, "Authorization": f"Bearer {token}"},
             )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=503, detail="Authentication service unavailable") from exc
@@ -80,10 +81,11 @@ async def _validate_supabase_token(token: str) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid authentication response") from exc
     if not isinstance(user, dict) or not user.get("id"):
         raise HTTPException(status_code=401, detail="Invalid access token")
+    metadata = user.get("user_metadata") or {}
     return {
         "sub": str(user["id"]),
         "email": user.get("email", ""),
-        "username": (user.get("user_metadata") or {}).get("username", ""),
+        "username": metadata.get("username", ""),
         "phone": user.get("phone", ""),
         "type": "supabase",
     }
@@ -94,8 +96,8 @@ async def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials |
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     token = credentials.credentials
 
-    # Prefer the application's own revocable session tokens when they are supplied.
-    if JWT_SECRET:
+    # Prefer the application's own revocable session token when present.
+    if os.getenv("JWT_SECRET", ""):
         try:
             payload = decode_access_token(token)
             try:
@@ -111,13 +113,9 @@ async def get_current_user(credentials: Annotated[HTTPAuthorizationCredentials |
                 raise HTTPException(status_code=401, detail="Invalid session")
             return payload
         except HTTPException as exc:
-            # A token that successfully decoded but failed a revocation/session check must
-            # not be silently upgraded to a different authentication mechanism.
             if exc.detail in {"Session revoked", "Session expired", "Invalid session"}:
                 raise
 
-    # Legacy frontend authentication uses Supabase access tokens. Validate them against
-    # Supabase instead of accepting a client-supplied user id header.
     return await _validate_supabase_token(token)
 
 
@@ -129,7 +127,7 @@ def generate_otp() -> str:
 
 
 def hash_otp(challenge_id: str, otp: str) -> str:
-    pepper = _require_secret(OTP_PEPPER, "OTP_PEPPER")
+    pepper = _require_secret(os.getenv("OTP_PEPPER", ""), "OTP_PEPPER")
     return hmac.new(pepper.encode(), f"{challenge_id}:{otp}".encode(), hashlib.sha256).hexdigest()
 
 
