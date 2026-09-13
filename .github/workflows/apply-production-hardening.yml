@@ -20,7 +20,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply deterministic beta hardening
-        run: python scripts/beta_hardening_v2.py
+        run: |
+          python scripts/beta_hardening_v2.py
+          python scripts/beta_hardening_v4.py
       - name: Validate Python syntax
         run: python -m compileall -q main.py backend scripts
       - name: Install backend test dependencies
