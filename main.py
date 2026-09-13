@@ -1548,7 +1548,7 @@ async def post_interaction(post_id: str, req: PostInteractionRequest, x_user_id:
     elif interaction_type in {"impression", "watch_time"}:
         metadata = req.metadata or {}
         watch_ms = int(metadata.get("watch_ms", 0) or 0) if interaction_type == "watch_time" else 0
-        await supabase_db_request("POST", "post_views", {"post_id": post_id, "user_id": current_user_id, "watch_ms": max(0, watch_ms)})
+        await supabase_db_request("POST", "post_views", {"post_id": post_id, "user_id": current_user_id, "watch_ms": max(0, watch_ms), "session_id": metadata.get("session_id")})
 
     event_type = "watch" if interaction_type == "watch_time" else interaction_type
     if event_type in {"impression", "click", "like", "comment", "share", "bookmark", "view", "watch"}:
@@ -1667,7 +1667,6 @@ async def get_feed(limit: int = 20, offset: int = 0, x_user_id: Optional[str] = 
             {"viewer_id": current_user_id, "page_limit": requested_limit, "page_offset": requested_offset},
         )
     except HTTPException:
-        # Safe fallback for deployments where the feed RPC migration has not yet been applied.
         query = f"?select=id,user_id,content,image_url,visibility,location,tags,created_at,deleted_at&deleted_at=is.null&order=created_at.desc,id.desc&limit={requested_limit}&offset={requested_offset}"
         result = await supabase_db_request("GET", "posts", query=query)
 
