@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion';
 import { Hop as HomeIcon, Search, CirclePlus as PlusCircle, MessageCircle, User, LogOut } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import { apiJson } from '@/utils/socialApi';
 
 interface HomeProps {
   user?: {
@@ -11,11 +12,17 @@ interface HomeProps {
 }
 
 export function Home({ user, onNavigate }: HomeProps) {
-  const handleLogout = () => {
-    localStorage.removeItem('user');
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    onNavigate('login');
+  const handleLogout = async () => {
+    try {
+      await apiJson('/api/auth/logout', { method: 'POST' });
+    } catch {
+      // Local session cleanup still happens if the remote session is already invalid.
+    } finally {
+      localStorage.removeItem('user');
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      onNavigate('login');
+    }
   };
 
   return (
@@ -31,7 +38,7 @@ export function Home({ user, onNavigate }: HomeProps) {
               LIVE
             </span>
             <button
-              onClick={handleLogout}
+              onClick={() => void handleLogout()}
               className="text-white/40 hover:text-white/80 transition-colors"
             >
               <LogOut className="w-5 h-5" />
@@ -108,32 +115,11 @@ export function Home({ user, onNavigate }: HomeProps) {
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 bg-[#0F1015]/95 backdrop-blur-xl border-t border-white/10 z-50">
         <div className="flex items-center justify-around py-3 px-2">
-          <NavButton
-            icon={HomeIcon}
-            label="Home"
-            active
-            onClick={() => onNavigate('home')}
-          />
-          <NavButton
-            icon={Search}
-            label="Search"
-            onClick={() => onNavigate('search')}
-          />
-          <NavButton
-            icon={PlusCircle}
-            label="Create"
-            onClick={() => onNavigate('create')}
-          />
-          <NavButton
-            icon={MessageCircle}
-            label="Chat"
-            onClick={() => onNavigate('chat')}
-          />
-          <NavButton
-            icon={User}
-            label="Profile"
-            onClick={() => onNavigate('profile')}
-          />
+          <NavButton icon={HomeIcon} label="Home" active onClick={() => onNavigate('home')} />
+          <NavButton icon={Search} label="Search" onClick={() => onNavigate('search')} />
+          <NavButton icon={PlusCircle} label="Create" onClick={() => onNavigate('create')} />
+          <NavButton icon={MessageCircle} label="Chat" onClick={() => onNavigate('chat')} />
+          <NavButton icon={User} label="Profile" onClick={() => onNavigate('profile')} />
         </div>
       </nav>
     </div>
