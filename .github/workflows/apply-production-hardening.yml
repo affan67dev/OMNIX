@@ -24,6 +24,7 @@ jobs:
           python scripts/beta_hardening_v2.py
           python scripts/beta_hardening_v4.py
           python scripts/beta_hardening_v5.py
+          python scripts/beta_hardening_v6.py
       - name: Validate Python syntax
         run: python -m compileall -q main.py backend scripts
       - name: Install backend test dependencies
