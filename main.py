@@ -1667,8 +1667,23 @@ async def get_feed(limit: int = 20, offset: int = 0, x_user_id: Optional[str] = 
             {"viewer_id": current_user_id, "page_limit": requested_limit, "page_offset": requested_offset},
         )
     except HTTPException:
-        query = f"?select=id,user_id,content,image_url,visibility,location,tags,created_at,deleted_at&deleted_at=is.null&order=created_at.desc,id.desc&limit={requested_limit}&offset={requested_offset}"
-        result = await supabase_db_request("GET", "posts", query=query)
+        # Safe compatibility path for deployments where the feed RPC migration is not applied yet.
+        fetch_limit = min(requested_offset + requested_limit * 4, 200)
+        query = f"?select=id,user_id,content,image_url,visibility,location,tags,created_at,deleted_at&deleted_at=is.null&order=created_at.desc,id.desc&limit={fetch_limit}&offset=0"
+        candidates = await supabase_db_request("GET", "posts", query=query)
+        visible = []
+        for post in candidates or []:
+            owner_id = str(post.get("user_id") or "")
+            visibility = post.get("visibility") or "public"
+            if owner_id == str(current_user_id):
+                visible.append(post)
+            elif visibility == "public" and not social_graph.is_blocked(str(current_user_id), owner_id):
+                visible.append(post)
+            elif visibility == "followers" and not social_graph.is_blocked(str(current_user_id), owner_id) and social_graph._is_following(str(current_user_id), owner_id):
+                visible.append(post)
+            if len(visible) >= requested_offset + requested_limit:
+                break
+        result = visible[requested_offset:requested_offset + requested_limit]
 
     return {"success": True, "posts": result or []}
 
