@@ -755,7 +755,7 @@ async def send_chat_message(conversation_id: str, req: SendMessageRequest, x_use
         raise HTTPException(status_code=400, detail="Message text or encrypted payload is required")
 
     current_user_id = resolve_current_user_id(x_user_id)
-    sender_name = req.sender_name or social_graph.users[current_user_id]["display_name"]
+    sender_name = req.sender_name or social_graph.users.get(current_user_id, {}).get("display_name", "You")
     try:
         message = social_graph.send_message(
             current_user_id,
@@ -925,7 +925,7 @@ async def follow_user(user_id: str, x_user_id: Optional[str] = Header(default=No
     except SocialGraphError as error:
         raise_social_error(error)
     if result.get("status") == "pending":
-        actor_name = social_graph.users[current_user_id]["display_name"]
+        actor_name = social_graph.users.get(current_user_id, {}).get("display_name", "You")
         try:
             await push_notification_service.send_social_event(user_id, actor_name, "follow_request", user_id)
         except PushNotificationError:
