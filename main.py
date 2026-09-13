@@ -455,7 +455,7 @@ class PostInteractionRequest(BaseModel):
 
 
 class PostCommentRequest(BaseModel):
-    comment: str
+    comment: str = Field(min_length=1, max_length=2000)
 
 
 class StoryCreateRequest(BaseModel):
@@ -1523,75 +1523,87 @@ async def get_story_viewers(story_id: str):
 
 @app.post("/api/posts/{post_id}/interactions")
 async def post_interaction(post_id: str, req: PostInteractionRequest, x_user_id: Optional[str] = Header(default=None)):
-    """Track post interaction events for recommendation pipelines."""
+    """Persist post engagement in Supabase instead of process memory."""
     current_user_id = resolve_current_user_id(x_user_id)
-    post = next((item for item in in_memory_posts if item.get('id') == post_id), None)
-    if post is None:
-        raise HTTPException(status_code=404, detail="Post not found")
-
-    interaction_type = (req.interaction_type or '').strip().lower()
-    if interaction_type not in {'like', 'dislike', 'comment', 'share', 'impression', 'hashtag_click', 'watch_time'}:
+    post = await _get_authorized_post(post_id, current_user_id)
+    interaction_type = (req.interaction_type or "").strip().lower()
+    allowed = {"like", "dislike", "comment", "share", "impression", "hashtag_click", "watch_time"}
+    if interaction_type not in allowed:
         raise HTTPException(status_code=400, detail="Unsupported interaction type")
 
-    event = {
-        'id': f"evt-{uuid.uuid4().hex[:10]}",
-        'post_id': post_id,
-        'user_id': current_user_id,
-        'interaction_type': interaction_type,
-        'metadata': req.metadata or {},
-        'created_at': datetime.now(timezone.utc).isoformat(),
-    }
-    post_interaction_events.append(event)
+    if interaction_type == "like":
+        try:
+            await supabase_db_request("POST", "post_likes", {"post_id": post_id, "user_id": current_user_id})
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+    elif interaction_type == "dislike":
+        await supabase_db_request("DELETE", "post_likes", query=f"?post_id=eq.{post_id}&user_id=eq.{current_user_id}")
+    elif interaction_type == "share":
+        try:
+            await supabase_db_request("POST", "post_shares", {"post_id": post_id, "user_id": current_user_id})
+        except HTTPException as exc:
+            if exc.status_code != 409:
+                raise
+    elif interaction_type in {"impression", "watch_time"}:
+        metadata = req.metadata or {}
+        watch_ms = int(metadata.get("watch_ms", 0) or 0) if interaction_type == "watch_time" else 0
+        await supabase_db_request("POST", "post_views", {"post_id": post_id, "user_id": current_user_id, "watch_ms": max(0, watch_ms)})
 
-    if interaction_type == 'like':
-        post['likes'] = int(post.get('likes', 0)) + 1
-    if interaction_type == 'dislike':
-        post['likes'] = max(0, int(post.get('likes', 0)) - 1)
-    if interaction_type == 'share':
-        post['shares_count'] = int(post.get('shares_count', 0)) + 1
-    if interaction_type == 'impression':
-        post['impression_count'] = int(post.get('impression_count', 0)) + 1
-    if interaction_type == 'comment':
-        post['comments_count'] = int(post.get('comments_count', 0)) + 1
+    event_type = "watch" if interaction_type == "watch_time" else interaction_type
+    if event_type in {"impression", "click", "like", "comment", "share", "bookmark", "view", "watch"}:
+        await supabase_db_request("POST", "feed_events", {"user_id": current_user_id, "post_id": post_id, "event_type": event_type, "value": None, "session_id": (req.metadata or {}).get("session_id")})
 
-    add_admin_log("INFO", f"Post event {interaction_type} on {post_id}")
-    return {"success": True, "event": event, "post": post}
+    return {"success": True, "event": {"post_id": post_id, "user_id": current_user_id, "interaction_type": interaction_type}, "post": post}
 
 
 @app.post("/api/posts/{post_id}/comments")
 async def add_post_comment(post_id: str, req: PostCommentRequest, x_user_id: Optional[str] = Header(default=None)):
     current_user_id = resolve_current_user_id(x_user_id)
-    post = next((item for item in in_memory_posts if item.get('id') == post_id), None)
-    if post is None:
-        raise HTTPException(status_code=404, detail="Post not found")
-    if not req.comment.strip():
+    await _get_authorized_post(post_id, current_user_id)
+    content = (req.comment or "").strip()
+    if not content:
         raise HTTPException(status_code=400, detail="Comment cannot be empty")
-
-    comments = post.setdefault('comments', [])
-    comment = {
-        'id': f"cmt-{uuid.uuid4().hex[:10]}",
-        'post_id': post_id,
-        'user_id': current_user_id,
-        'comment': req.comment.strip(),
-        'created_at': datetime.now(timezone.utc).isoformat(),
-    }
-    comments.append(comment)
-    post['comments_count'] = len(comments)
-    add_admin_log("INFO", f"Comment added on {post_id}")
-    return {"success": True, "comment": comment, "comments_count": len(comments)}
+    if len(content) > 2000:
+        raise HTTPException(status_code=422, detail="Comment is too long")
+    row = await supabase_db_request("POST", "post_comments", {"post_id": post_id, "user_id": current_user_id, "content": content})
+    comment = row[0] if isinstance(row, list) and row else row
+    return {"success": True, "comment": comment, "comments_count": len(await supabase_db_request("GET", "post_comments", query=f"?select=id&post_id=eq.{post_id}"))}
 
 
 @app.get("/api/posts/{post_id}/comments")
-async def list_post_comments(post_id: str):
-    post = next((item for item in in_memory_posts if item.get('id') == post_id), None)
-    if post is None:
-        raise HTTPException(status_code=404, detail="Post not found")
-    return {"success": True, "comments": post.get('comments', [])}
+async def list_post_comments(post_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    await _get_authorized_post(post_id, current_user_id)
+    comments = await supabase_db_request("GET", "post_comments", query=f"?select=id,post_id,user_id,content,created_at,updated_at&post_id=eq.{post_id}&order=created_at.asc&limit=100")
+    return {"success": True, "comments": comments}
 
 
 @app.get("/api/recommendation/events")
 async def recommendation_events(limit: int = 80):
     return {"success": True, "events": post_interaction_events[-limit:]}
+
+
+async def _get_authorized_post(post_id: str, viewer_id: str) -> dict:
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", post_id or ""):
+        raise HTTPException(status_code=400, detail="Invalid post id")
+    query = f"?select=id,user_id,visibility,deleted_at&id=eq.{post_id}&limit=1"
+    rows = await supabase_db_request("GET", "posts", query=query)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Post not found")
+    post = rows[0]
+    if post.get("deleted_at"):
+        raise HTTPException(status_code=404, detail="Post not found")
+    owner_id = str(post.get("user_id") or "")
+    visibility = post.get("visibility") or "public"
+    if owner_id != str(viewer_id):
+        if visibility == "private":
+            raise HTTPException(status_code=403, detail="Post is private")
+        if visibility == "followers" and not social_graph._is_following(str(viewer_id), owner_id):
+            raise HTTPException(status_code=403, detail="Post is limited to followers")
+        if social_graph.is_blocked(str(viewer_id), owner_id):
+            raise HTTPException(status_code=403, detail="Post unavailable")
+    return post
 
 
 # Posts API Routes
@@ -1638,29 +1650,28 @@ async def create_post(req: PostRequest, authorization: Optional[str] = None, x_u
 
 @app.get("/api/posts/feed")
 async def get_feed(limit: int = 20, offset: int = 0, x_user_id: Optional[str] = Header(default=None)):
-    """Get posts feed ranked by engagement and recency."""
-    requested_limit = max(1, min(int(limit), 100))
-    requested_offset = max(0, int(offset))
+    """Return a bounded, database-filtered feed for the authenticated user."""
     current_user_id = resolve_current_user_id(x_user_id)
+    requested_limit = max(1, min(int(limit), 50))
+    requested_offset = max(0, int(offset))
 
     if not SUPABASE_URL:
-        visible_posts = [post for post in in_memory_posts if can_view_author_posts(current_user_id, post.get('user_id', ''))]
-        ranked_posts = rank_posts_for_feed(visible_posts)
-        paged_posts = ranked_posts[requested_offset:requested_offset + requested_limit]
-        return {"success": True, "posts": paged_posts}
+        visible_posts = [post for post in in_memory_posts if can_view_author_posts(current_user_id, post.get("user_id", ""))]
+        ranked = rank_posts_for_feed(visible_posts)
+        return {"success": True, "posts": ranked[requested_offset:requested_offset + requested_limit]}
 
-    fetch_limit = min(requested_offset + requested_limit * 4 + 20, 200)
-    query = f"?select=*&order=created_at.desc&limit={fetch_limit}&offset=0"
     try:
-        result = await supabase_db_request("GET", "posts", query=query)
+        result = await supabase_db_request(
+            "POST",
+            "rpc/get_feed_posts",
+            {"viewer_id": current_user_id, "page_limit": requested_limit, "page_offset": requested_offset},
+        )
     except HTTPException:
-        visible_posts = [post for post in in_memory_posts if can_view_author_posts(current_user_id, post.get('user_id', ''))]
-        result = visible_posts
+        # Safe fallback for deployments where the feed RPC migration has not yet been applied.
+        query = f"?select=id,user_id,content,image_url,visibility,location,tags,created_at,deleted_at&deleted_at=is.null&order=created_at.desc,id.desc&limit={requested_limit}&offset={requested_offset}"
+        result = await supabase_db_request("GET", "posts", query=query)
 
-    ranked_posts = rank_posts_for_feed(result)
-    paged_posts = ranked_posts[requested_offset:requested_offset + requested_limit]
-
-    return {"success": True, "posts": paged_posts}
+    return {"success": True, "posts": result or []}
 
 
 @app.post("/api/admin/moderation/flag")
