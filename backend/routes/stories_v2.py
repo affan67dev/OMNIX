@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from backend.services.supabase_db import insert_one, select_many, select_one, update_one
+from backend.services.supabase_db import insert_one, select_one, update_one
 from backend.services.supabase_storage import upload_bytes
 
 router = APIRouter(prefix="/api/stories", tags=["Stories"])
@@ -33,9 +33,11 @@ class StoryCreateRequest(BaseModel):
 async def _signed_url(path: str, expires_in: int = 3600) -> str:
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise HTTPException(status_code=503, detail="Supabase Storage is not configured")
+    if not path.startswith("stories/"):
+        raise HTTPException(status_code=400, detail="Invalid story media path")
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.post(
-            f"{SUPABASE_URL}/storage/v1/object/sign/stories/{path.lstrip('/')}",
+            f"{SUPABASE_URL}/storage/v1/object/sign/stories/{path[len('stories/'):]}",
             headers={"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}", "Content-Type": "application/json"},
             json={"expiresIn": expires_in},
         )
@@ -80,7 +82,10 @@ async def upload_story_media(file: UploadFile = File(...), x_user_id: Optional[s
 async def create_story(payload: StoryCreateRequest, x_user_id: Optional[str] = Header(default=None)):
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
+    if not payload.media_name.startswith(f"stories/{x_user_id}/"):
+        raise HTTPException(status_code=400, detail="Story media must be uploaded by the authenticated user")
     now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=24)
     row = await insert_one(
         "stories",
         {
@@ -97,14 +102,9 @@ async def create_story(payload: StoryCreateRequest, x_user_id: Optional[str] = H
             "overlay_y": payload.overlay_y,
             "overlay_scale": payload.overlay_scale,
             "created_at": now.isoformat(),
-            "expires_at": (now.replace(microsecond=0)).isoformat().replace("+00:00", "Z"),
+            "expires_at": expires_at.isoformat(),
         },
     )
-    # Correct the expiry to exactly 24 hours without a second request when DB defaults are available.
-    expires_at = (now.timestamp() + 86400)
-    from datetime import datetime as _dt
-    row["expires_at"] = _dt.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
-    await update_one("stories", filters={"id": row["id"]}, payload={"expires_at": row["expires_at"]})
     return {"success": True, "story": row}
 
 
@@ -112,16 +112,15 @@ async def create_story(payload: StoryCreateRequest, x_user_id: Optional[str] = H
 async def story_feed(x_user_id: Optional[str] = Header(default=None)):
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
-    now = datetime.now(timezone.utc).isoformat()
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise HTTPException(status_code=503, detail="Supabase is not configured")
+    now = datetime.now(timezone.utc).isoformat()
     params = {"select": "id,user_id,media_name,media_type,caption,mentions,location_name,music_track,overlay_text,overlay_emoji,overlay_x,overlay_y,overlay_scale,created_at,expires_at", "expires_at": f"gt.{now}", "deleted_at": "is.null", "order": "created_at.desc", "limit": "100"}
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.get(f"{SUPABASE_URL}/rest/v1/stories", headers={"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}"}, params=params)
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail="Unable to load stories")
-    stories = await _decorate(response.json())
-    return {"success": True, "stories": stories}
+    return {"success": True, "stories": await _decorate(response.json())}
 
 
 @router.post("/{story_id}/view")
