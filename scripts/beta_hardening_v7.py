@@ -18,13 +18,15 @@ replace_once(main, "app.include_router(auth_v2_router)\n", "app.include_router(a
 
 old_guard = '''async def _validate_supabase_access_token(token: str) -> str:\n    if not SUPABASE_URL or not SUPABASE_ANON_KEY:\n'''
 new_guard = '''async def _validate_supabase_access_token(token: str) -> str:\n    # The phone-auth flow returns an application JWT backed by auth_sessions.\n    # Validate that revocable session first; otherwise fall back to a Supabase Auth JWT.\n    from backend.core.security import decode_access_token\n    if os.getenv("JWT_SECRET", ""):\n        try:\n            payload = decode_access_token(token)\n            session = await supabase_db_request("GET", "auth_sessions", query=f"?select=user_id,expires_at,revoked_at&token_jti=eq.{payload['jti']}&limit=1")\n            row = session[0] if session else None\n            if not row or row.get("revoked_at") or str(row.get("user_id")) != str(payload.get("sub")):\n                raise HTTPException(status_code=401, detail="Invalid or revoked session")\n            expiry = _parse_datetime(row.get("expires_at"))\n            if expiry and expiry <= datetime.now(timezone.utc):\n                raise HTTPException(status_code=401, detail="Session expired")\n            return str(payload["sub"])\n        except HTTPException:\n            raise\n        except Exception:\n            pass\n\n    if not SUPABASE_URL or not SUPABASE_ANON_KEY:\n'''
-replace_once(main, old_guard, new_guard, "main.py auth guard")
+main_text = main.read_text(encoding="utf-8")
+if new_guard not in main_text:
+    if old_guard not in main_text:
+        raise SystemExit("beta hardening v7: auth guard is neither legacy nor already patched")
+    main_text = main_text.replace(old_guard, new_guard, 1)
+    main.write_text(main_text, encoding="utf-8")
 
 text = main.read_text(encoding="utf-8")
-old_limit = 'max_body = 1 * 1024 * 1024 if "application/json" in content_type else 2 * 1024 * 1024'
-new_limit = 'max_body = 1 * 1024 * 1024 if "application/json" in content_type else 25 * 1024 * 1024'
-if old_limit in text:
-    text = text.replace(old_limit, new_limit, 1)
+text = text.replace('max_body = 1 * 1024 * 1024 if "application/json" in content_type else 2 * 1024 * 1024', 'max_body = 1 * 1024 * 1024 if "application/json" in content_type else 25 * 1024 * 1024', 1)
 main.write_text(text, encoding="utf-8")
 
 env_example = ROOT / ".env.example"
@@ -33,12 +35,7 @@ env = env.replace("SUPABASE_URL=https://YOUR_PROJECT.supabase.co", "SUPABASE_URL
 env_example.write_text(env, encoding="utf-8")
 
 social_api = ROOT / "src/utils/socialApi.ts"
-replace_once(
-    social_api,
-    "export { API_BASE };",
-    '''export async function apiUpload<T>(path: string, file: File): Promise<T> {\n  const url = new URL(`${API_BASE}${path}`);\n  const form = new FormData();\n  form.append('file', file);\n  const headers = new Headers();\n  try {\n    const accessToken = window.localStorage.getItem('access_token');\n    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);\n  } catch (error) {\n    console.error('Unable to read access token', error);\n  }\n  const response = await fetch(url.toString(), { method: 'POST', headers, body: form });\n  const payload = await response.json().catch(() => null);\n  if (!response.ok) {\n    const detail = payload && typeof payload === 'object' && 'detail' in payload ? String(payload.detail) : `Upload failed with status ${response.status}`;\n    throw new Error(detail);\n  }\n  return payload as T;\n}\n\nexport { API_BASE };''',
-    "socialApi.ts uploader",
-)
+replace_once(social_api, "export { API_BASE };", '''export async function apiUpload<T>(path: string, file: File): Promise<T> {\n  const url = new URL(`${API_BASE}${path}`);\n  const form = new FormData();\n  form.append('file', file);\n  const headers = new Headers();\n  try {\n    const accessToken = window.localStorage.getItem('access_token');\n    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);\n  } catch (error) {\n    console.error('Unable to read access token', error);\n  }\n  const response = await fetch(url.toString(), { method: 'POST', headers, body: form });\n  const payload = await response.json().catch(() => null);\n  if (!response.ok) {\n    const detail = payload && typeof payload === 'object' && 'detail' in payload ? String(payload.detail) : `Upload failed with status ${response.status}`;\n    throw new Error(detail);\n  }\n  return payload as T;\n}\n\nexport { API_BASE };''', "socialApi.ts uploader")
 
 stories = ROOT / "src/components/ui/Stories.tsx"
 replace_once(stories, "import { apiJson } from '../../utils/socialApi';", "import { apiJson, apiUpload } from '../../utils/socialApi';", "Stories import")
