@@ -28,13 +28,6 @@ as $$
     )
     or (
       post_visibility = 'private' and viewer = target_user
-    )
-    or (
-      post_visibility <> 'public'
-      and exists (
-        select 1 from public.profiles p
-        where p.user_id = target_user and p.is_private = false
-      )
     );
 $$;
 
