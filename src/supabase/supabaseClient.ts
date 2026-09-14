@@ -1,35 +1,278 @@
 type Session = { access_token: string; refresh_token: string; expires_in: number; expires_at?: number; user: any };
 type AuthListener = (event: string, session: Session | null) => void;
+
 const SUPABASE_URL = String(import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_KEY = String(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '');
 const STORAGE_KEY = 'omnix.supabase.session';
 const PKCE_KEY = 'omnix.supabase.pkce.verifier';
 const listeners = new Set<AuthListener>();
 let currentSession: Session | null = null;
-let initialized = false;
-function requireConfig() { if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY).'); }
-function save(session: Session | null) { currentSession = session; if (session) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session)); else window.localStorage.removeItem(STORAGE_KEY); }
-function emit(event: string, session: Session | null) { for (const listener of listeners) listener(event, session); }
-async function request(path: string, init: RequestInit = {}, token?: string) { requireConfig(); const headers = new Headers(init.headers || {}); headers.set('apikey', SUPABASE_KEY); headers.set('Content-Type', 'application/json'); if (token) headers.set('Authorization', `Bearer ${token}`); const response = await fetch(`${SUPABASE_URL}${path}`, { ...init, headers }); let body: any = null; try { body = await response.json(); } catch { /* empty response */ } if (!response.ok) { const error: any = new Error(body?.msg || body?.message || body?.error_description || body?.error || `Supabase request failed (${response.status})`); error.status = response.status; error.code = body?.code; throw error; } return body; }
-async function userForToken(token: string) { return request('/auth/v1/user', {}, token); }
-function base64Url(bytes: Uint8Array) { let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, ''); }
-async function createPkceVerifier() { const bytes = new Uint8Array(32); crypto.getRandomValues(bytes); return base64Url(bytes); }
-async function createPkceChallenge(verifier: string) { const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)); return base64Url(new Uint8Array(hash)); }
-async function initialize() { if (initialized) return; initialized = true; try { const stored = window.localStorage.getItem(STORAGE_KEY); currentSession = stored ? JSON.parse(stored) : null; } catch { currentSession = null; }
-  const url = new URL(window.location.href); const code = url.searchParams.get('code'); if (code) { const verifier = window.sessionStorage.getItem(PKCE_KEY); if (verifier) { try { const result = await request('/auth/v1/token?grant_type=pkce', { method: 'POST', body: JSON.stringify({ auth_code: code, code_verifier: verifier }) }); const session: Session = { ...result, expires_at: Math.floor(Date.now() / 1000) + Number(result.expires_in || 3600) }; save(session); window.sessionStorage.removeItem(PKCE_KEY); url.searchParams.delete('code'); url.searchParams.delete('state'); window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : '')); emit('SIGNED_IN', session); } catch { window.sessionStorage.removeItem(PKCE_KEY); emit('AUTH_ERROR', null); } } }
-  const hash = new URLSearchParams(window.location.hash.replace(/^#/, '')); const accessToken = hash.get('access_token'); const refreshToken = hash.get('refresh_token'); const expiresIn = Number(hash.get('expires_in') || 3600); const type = hash.get('type'); if (accessToken && refreshToken) { try { const user = await userForToken(accessToken); const session: Session = { access_token: accessToken, refresh_token: refreshToken, expires_in: expiresIn, expires_at: Math.floor(Date.now() / 1000) + expiresIn, user }; save(session); window.history.replaceState({}, document.title, window.location.pathname + window.location.search); emit(type === 'recovery' ? 'PASSWORD_RECOVERY' : 'SIGNED_IN', session); } catch { save(null); } } else if (currentSession) emit('INITIAL_SESSION', currentSession); else emit('INITIAL_SESSION', null);
+let initializationPromise: Promise<void> | null = null;
+
+function requireConfig() {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY (or VITE_SUPABASE_ANON_KEY).');
+  }
 }
-void initialize();
+
+function save(session: Session | null) {
+  currentSession = session;
+  if (session) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  else window.localStorage.removeItem(STORAGE_KEY);
+}
+
+function emit(event: string, session: Session | null) {
+  for (const listener of listeners) listener(event, session);
+}
+
+async function request(path: string, init: RequestInit = {}, token?: string) {
+  requireConfig();
+  const headers = new Headers(init.headers || {});
+  headers.set('apikey', SUPABASE_KEY);
+  headers.set('Content-Type', 'application/json');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${SUPABASE_URL}${path}`, { ...init, headers });
+  let body: any = null;
+  try { body = await response.json(); } catch { /* empty response */ }
+  if (!response.ok) {
+    const error: any = new Error(body?.msg || body?.message || body?.error_description || body?.error || `Supabase request failed (${response.status})`);
+    error.status = response.status;
+    error.code = body?.code;
+    throw error;
+  }
+  return body;
+}
+
+async function userForToken(token: string) {
+  return request('/auth/v1/user', {}, token);
+}
+
+function base64Url(bytes: Uint8Array) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+async function createPkceVerifier() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return base64Url(bytes);
+}
+
+async function createPkceChallenge(verifier: string) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return base64Url(new Uint8Array(hash));
+}
+
+async function initialize() {
+  if (initializationPromise) return initializationPromise;
+  initializationPromise = (async () => {
+    requireConfig();
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      currentSession = stored ? JSON.parse(stored) : null;
+    } catch {
+      currentSession = null;
+    }
+
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get('code');
+    if (code) {
+      const verifier = window.sessionStorage.getItem(PKCE_KEY);
+      if (verifier) {
+        try {
+          const result = await request('/auth/v1/token?grant_type=pkce', {
+            method: 'POST',
+            body: JSON.stringify({ auth_code: code, code_verifier: verifier }),
+          });
+          const session: Session = { ...result, expires_at: Math.floor(Date.now() / 1000) + Number(result.expires_in || 3600) };
+          save(session);
+          window.sessionStorage.removeItem(PKCE_KEY);
+          url.searchParams.delete('code');
+          url.searchParams.delete('state');
+          window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : ''));
+          emit('SIGNED_IN', session);
+        } catch {
+          window.sessionStorage.removeItem(PKCE_KEY);
+          emit('AUTH_ERROR', null);
+        }
+      }
+    }
+
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const accessToken = hash.get('access_token');
+    const refreshToken = hash.get('refresh_token');
+    const expiresIn = Number(hash.get('expires_in') || 3600);
+    const type = hash.get('type');
+    if (accessToken && refreshToken) {
+      try {
+        const user = await userForToken(accessToken);
+        const session: Session = {
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          expires_in: expiresIn,
+          expires_at: Math.floor(Date.now() / 1000) + expiresIn,
+          user,
+        };
+        save(session);
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+        emit(type === 'recovery' ? 'PASSWORD_RECOVERY' : 'SIGNED_IN', session);
+      } catch {
+        save(null);
+      }
+    } else if (currentSession) {
+      emit('INITIAL_SESSION', currentSession);
+    } else {
+      emit('INITIAL_SESSION', null);
+    }
+  })().catch((error) => {
+    initializationPromise = null;
+    throw error;
+  });
+  return initializationPromise;
+}
+
 const auth = {
-  async getSession() { await initialize(); if (!currentSession) return { data: { session: null }, error: null }; const session = currentSession; const expiresAt = session.expires_at || 0; if (expiresAt && expiresAt - Math.floor(Date.now() / 1000) < 60) { try { const refreshed = await request('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: JSON.stringify({ refresh_token: session.refresh_token }) }); const refreshedSession: Session = { ...session, ...refreshed, expires_at: Math.floor(Date.now() / 1000) + Number(refreshed.expires_in || 3600) }; if (!refreshedSession.user) refreshedSession.user = await userForToken(refreshedSession.access_token); save(refreshedSession); emit('TOKEN_REFRESHED', refreshedSession); return { data: { session: refreshedSession }, error: null }; } catch { save(null); emit('SIGNED_OUT', null); return { data: { session: null }, error: null }; } } return { data: { session }, error: null }; },
-  async signInWithPassword(credentials: { email?: string; phone?: string; password: string }) { try { const result = await request('/auth/v1/token?grant_type=password', { method: 'POST', body: JSON.stringify(credentials) }); const session: Session = { ...result, expires_at: Math.floor(Date.now() / 1000) + Number(result.expires_in || 3600) }; save(session); emit('SIGNED_IN', session); return { data: { session, user: result.user }, error: null }; } catch (error: any) { return { data: { session: null, user: null }, error }; } },
-  async signInWithOtp({ phone }: { phone: string; options?: any }) { try { await request('/auth/v1/otp', { method: 'POST', body: JSON.stringify({ phone, create_user: true }) }); return { data: {}, error: null }; } catch (error: any) { return { data: {}, error }; } },
-  async verifyOtp({ phone, token, type }: { phone: string; token: string; type: string }) { try { const result = await request('/auth/v1/verify', { method: 'POST', body: JSON.stringify({ phone, token, type }) }); const session: Session = { ...result, expires_at: Math.floor(Date.now() / 1000) + Number(result.expires_in || 3600) }; save(session); emit('SIGNED_IN', session); return { data: { session, user: result.user }, error: null }; } catch (error: any) { return { data: { session: null, user: null }, error }; } },
-  async updateUser(attributes: { email?: string; password?: string; data?: Record<string, unknown> }) { const session = (await auth.getSession()).data.session; if (!session) return { data: { user: null }, error: new Error('No active authentication session.') }; try { const user = await request('/auth/v1/user', { method: 'PUT', body: JSON.stringify(attributes) }, session.access_token); save({ ...session, user }); emit('USER_UPDATED', currentSession); return { data: { user }, error: null }; } catch (error: any) { return { data: { user: null }, error }; } },
-  async signInWithOAuth({ provider, options }: { provider: string; options?: { redirectTo?: string } }) { requireConfig(); const verifier = await createPkceVerifier(); const challenge = await createPkceChallenge(verifier); window.sessionStorage.setItem(PKCE_KEY, verifier); const redirectTo = options?.redirectTo || window.location.origin + '/'; const url = `${SUPABASE_URL}/auth/v1/authorize?provider=${encodeURIComponent(provider)}&redirect_to=${encodeURIComponent(redirectTo)}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=S256`; window.location.assign(url); return { data: { url }, error: null }; },
-  async signOut() { try { const session = (await auth.getSession()).data.session; if (session) await request('/auth/v1/logout', { method: 'POST', body: JSON.stringify({}) }, session.access_token); } catch { /* local state is still cleared */ } save(null); emit('SIGNED_OUT', null); return { error: null }; },
-  async resetPasswordForEmail(email: string, options: { redirectTo: string }) { try { await request('/auth/v1/recover', { method: 'POST', body: JSON.stringify({ email, redirect_to: options.redirectTo }) }); return { data: {}, error: null }; } catch (error: any) { return { data: {}, error }; } },
-  onAuthStateChange(callback: AuthListener) { listeners.add(callback); void initialize().then(() => callback('INITIAL_SESSION', currentSession)); return { data: { subscription: { unsubscribe: () => { listeners.delete(callback); } } } }; },
+  async getSession() {
+    await initialize();
+    if (!currentSession) return { data: { session: null }, error: null };
+    const session = currentSession;
+    const expiresAt = session.expires_at || 0;
+    if (expiresAt && expiresAt - Math.floor(Date.now() / 1000) < 60) {
+      try {
+        const refreshed = await request('/auth/v1/token?grant_type=refresh_token', {
+          method: 'POST',
+          body: JSON.stringify({ refresh_token: session.refresh_token }),
+        });
+        const refreshedSession: Session = {
+          ...session,
+          ...refreshed,
+          expires_at: Math.floor(Date.now() / 1000) + Number(refreshed.expires_in || 3600),
+        };
+        if (!refreshedSession.user) refreshedSession.user = await userForToken(refreshedSession.access_token);
+        save(refreshedSession);
+        emit('TOKEN_REFRESHED', refreshedSession);
+        return { data: { session: refreshedSession }, error: null };
+      } catch {
+        save(null);
+        emit('SIGNED_OUT', null);
+        return { data: { session: null }, error: null };
+      }
+    }
+    return { data: { session }, error: null };
+  },
+  async signInWithPassword(credentials: { email?: string; phone?: string; password: string }) {
+    try {
+      const result = await request('/auth/v1/token?grant_type=password', { method: 'POST', body: JSON.stringify(credentials) });
+      const session: Session = { ...result, expires_at: Math.floor(Date.now() / 1000) + Number(result.expires_in || 3600) };
+      save(session);
+      emit('SIGNED_IN', session);
+      return { data: { session, user: result.user }, error: null };
+    } catch (error: any) {
+      return { data: { session: null, user: null }, error };
+    }
+  },
+  async signInWithOtp({ phone }: { phone: string; options?: any }) {
+    try {
+      await request('/auth/v1/otp', { method: 'POST', body: JSON.stringify({ phone, create_user: true }) });
+      return { data: {}, error: null };
+    } catch (error: any) {
+      return { data: {}, error };
+    }
+  },
+  async verifyOtp({ phone, token, type }: { phone: string; token: string; type: string }) {
+    try {
+      const result = await request('/auth/v1/verify', { method: 'POST', body: JSON.stringify({ phone, token, type }) });
+      const session: Session = { ...result, expires_at: Math.floor(Date.now() / 1000) + Number(result.expires_in || 3600) };
+      save(session);
+      emit('SIGNED_IN', session);
+      return { data: { session, user: result.user }, error: null };
+    } catch (error: any) {
+      return { data: { session: null, user: null }, error };
+    }
+  },
+  async updateUser(attributes: { email?: string; password?: string; data?: Record<string, unknown> }) {
+    const session = (await auth.getSession()).data.session;
+    if (!session) return { data: { user: null }, error: new Error('No active authentication session.') };
+    try {
+      const user = await request('/auth/v1/user', { method: 'PUT', body: JSON.stringify(attributes) }, session.access_token);
+      save({ ...session, user });
+      emit('USER_UPDATED', currentSession);
+      return { data: { user }, error: null };
+    } catch (error: any) {
+      return { data: { user: null }, error };
+    }
+  },
+  async signInWithOAuth({ provider, options }: { provider: string; options?: { redirectTo?: string } }) {
+    requireConfig();
+    const verifier = await createPkceVerifier();
+    const challenge = await createPkceChallenge(verifier);
+    window.sessionStorage.setItem(PKCE_KEY, verifier);
+    const redirectTo = options?.redirectTo || `${window.location.origin}/`;
+    const url = `${SUPABASE_URL}/auth/v1/authorize?provider=${encodeURIComponent(provider)}&redirect_to=${encodeURIComponent(redirectTo)}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=S256`;
+    window.location.assign(url);
+    return { data: { url }, error: null };
+  },
+  async signOut() {
+    try {
+      const session = (await auth.getSession()).data.session;
+      if (session) await request('/auth/v1/logout', { method: 'POST', body: JSON.stringify({}) }, session.access_token);
+    } catch { /* local state is still cleared */ }
+    save(null);
+    emit('SIGNED_OUT', null);
+    return { error: null };
+  },
+  async resetPasswordForEmail(email: string, options: { redirectTo: string }) {
+    try {
+      await request('/auth/v1/recover', { method: 'POST', body: JSON.stringify({ email, redirect_to: options.redirectTo }) });
+      return { data: {}, error: null };
+    } catch (error: any) {
+      return { data: {}, error };
+    }
+  },
+  async updatePassword(password: string) {
+    return auth.updateUser({ password });
+  },
+  onAuthStateChange(callback: AuthListener) {
+    listeners.add(callback);
+    void initialize().then(() => callback('INITIAL_SESSION', currentSession)).catch(() => callback('AUTH_ERROR', null));
+    return { data: { subscription: { unsubscribe: () => listeners.delete(callback) } } };
+  },
 };
-function queryBuilder(table: string) { let columns = '*'; let filters: Array<[string, string]> = []; let updatePayload: Record<string, unknown> | null = null; const builder: any = { select(value = '*') { columns = value; return builder; }, eq(column: string, value: string) { filters.push([column, value]); return builder; }, update(value: Record<string, unknown>) { updatePayload = value; return builder; }, async maybeSingle() { requireConfig(); const params = new URLSearchParams({ select: columns, limit: '1' }); for (const [key, value] of filters) params.set(key, `eq.${value}`); try { const result = await request(`/rest/v1/${table}?${params.toString()}`, {}, currentSession?.access_token); return { data: Array.isArray(result) && result.length ? result[0] : null, error: null }; } catch (error) { return { data: null, error }; } }, then(resolve: any, reject: any) { const run = async () => { requireConfig(); const params = new URLSearchParams({ select: columns }); for (const [key, value] of filters) params.set(key, `eq.${value}`); const result = updatePayload ? await request(`/rest/v1/${table}?${params.toString()}`, { method: 'PATCH', body: JSON.stringify(updatePayload) }, currentSession?.access_token) : await request(`/rest/v1/${table}?${params.toString()}`, {}, currentSession?.access_token); return { data: result, error: null }; }; return run().then(resolve, reject); } }; return builder; }
+
+function queryBuilder(table: string) {
+  let columns = '*';
+  let filters: Array<[string, string]> = [];
+  let updatePayload: Record<string, unknown> | null = null;
+  const builder: any = {
+    select(value = '*') { columns = value; return builder; },
+    eq(column: string, value: string) { filters.push([column, value]); return builder; },
+    update(value: Record<string, unknown>) { updatePayload = value; return builder; },
+    async maybeSingle() {
+      requireConfig();
+      const params = new URLSearchParams({ select: columns, limit: '1' });
+      for (const [key, value] of filters) params.set(key, `eq.${value}`);
+      try {
+        const result = await request(`/rest/v1/${table}?${params.toString()}`, {}, currentSession?.access_token);
+        return { data: Array.isArray(result) && result.length ? result[0] : null, error: null };
+      } catch (error) {
+        return { data: null, error };
+      }
+    },
+    then(resolve: any, reject: any) {
+      const run = async () => {
+        requireConfig();
+        const params = new URLSearchParams({ select: columns });
+        for (const [key, value] of filters) params.set(key, `eq.${value}`);
+        const result = updatePayload
+          ? await request(`/rest/v1/${table}?${params.toString()}`, { method: 'PATCH', body: JSON.stringify(updatePayload) }, currentSession?.access_token)
+          : await request(`/rest/v1/${table}?${params.toString()}`, {}, currentSession?.access_token);
+        return { data: result, error: null };
+      };
+      return run().then(resolve, reject);
+    },
+  };
+  return builder;
+}
+
 export const supabase = { auth, from: queryBuilder };
