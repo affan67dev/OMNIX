@@ -19,7 +19,7 @@ replace_once(main, "app.include_router(auth_v2_router)\n", "app.include_router(a
 old_guard = '''async def _validate_supabase_access_token(token: str) -> str:\n    if not SUPABASE_URL or not SUPABASE_ANON_KEY:\n'''
 new_guard = '''async def _validate_supabase_access_token(token: str) -> str:\n    # The phone-auth flow returns an application JWT backed by auth_sessions.\n    # Validate that revocable session first; otherwise fall back to a Supabase Auth JWT.\n    from backend.core.security import decode_access_token\n    if os.getenv("JWT_SECRET", ""):\n        try:\n            payload = decode_access_token(token)\n            session = await supabase_db_request("GET", "auth_sessions", query=f"?select=user_id,expires_at,revoked_at&token_jti=eq.{payload['jti']}&limit=1")\n            row = session[0] if session else None\n            if not row or row.get("revoked_at") or str(row.get("user_id")) != str(payload.get("sub")):\n                raise HTTPException(status_code=401, detail="Invalid or revoked session")\n            expiry = _parse_datetime(row.get("expires_at"))\n            if expiry and expiry <= datetime.now(timezone.utc):\n                raise HTTPException(status_code=401, detail="Session expired")\n            return str(payload["sub"])\n        except HTTPException:\n            raise\n        except Exception:\n            pass\n\n    if not SUPABASE_URL or not SUPABASE_ANON_KEY:\n'''
 main_text = main.read_text(encoding="utf-8")
-if new_guard not in main_text:
+if "decode_access_token(token)" not in main_text:
     if old_guard not in main_text:
         raise SystemExit("beta hardening v7: auth guard is neither legacy nor already patched")
     main_text = main_text.replace(old_guard, new_guard, 1)
