@@ -1,19 +1,10 @@
+import { supabase } from '../supabase/supabaseClient';
 
-import { API_BASE } from './socialApi';
-
-export type LoginMethod = 'email' | 'phone';
-
-export type SignupPayload = {
-  username: string;
-  email: string;
-  password: string;
-  first_name: string;
-  last_name: string;
-  display_nickname: string;
-  phone_country_code: string;
-  phone_number: string;
-  otp_challenge_id: string;
-  legal_accepted: boolean;
+export type AuthUser = {
+  id: string;
+  email?: string;
+  username?: string;
+  phone?: string;
 };
 
 export type AuthSuccessResponse = {
@@ -21,96 +12,150 @@ export type AuthSuccessResponse = {
   access_token: string;
   refresh_token: string;
   expires_in: number;
-  user: {
-    id: string;
-    email: string;
-    username: string;
-    phone?: string;
-  };
+  user: AuthUser;
 };
 
-export type ForgotPasswordMode = 'email' | 'phone';
+function normalizePhone(countryCode: string, phone: string): string {
+  const cc = countryCode.trim().replace(/[^\d+]/g, '');
+  const digits = phone.replace(/\D/g, '');
+  if (!/^\+\d{1,4}$/.test(cc)) throw new Error('Enter a valid country code.');
+  if (digits.length < 8 || digits.length > 15) throw new Error('Enter a valid phone number.');
+  return `${cc}${digits}`;
+}
 
-export type ForgotPasswordResponse = {
-  success: boolean;
-  message: string;
-  challenge_id?: string;
-  expires_at?: string;
-  otp_code?: string;
-};
-
-async function authRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new Error('Network unavailable. Please check your connection and try again.');
+function validateUsername(value: string): string {
+  const username = value.trim().toLowerCase();
+  if (!/^[a-z0-9_]{3,30}$/.test(username)) {
+    throw new Error('Username must be 3–30 characters using letters, numbers or underscores.');
   }
-
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    const detail = payload && typeof payload === 'object' && 'detail' in payload
-      ? String(payload.detail)
-      : 'Authentication request failed';
-    throw new Error(detail);
-  }
-
-  return payload as T;
+  return username;
 }
 
-export async function sendSignupOtp(countryCode: string, phoneNumber: string): Promise<{ challenge_id: string; expires_at: string; otp_code?: string; message: string }> {
-  return authRequest('/api/auth/otp/send', {
-    country_code: countryCode,
-    phone_number: phoneNumber,
-  });
+function validatePassword(password: string): void {
+  if (password.length < 8) throw new Error('Password must be at least 8 characters.');
+  if (password.length > 72) throw new Error('Password is too long.');
 }
 
-export async function verifySignupOtp(challengeId: string, otpCode: string): Promise<{ success: boolean; challenge_id: string; phone: string; message: string }> {
-  return authRequest('/api/auth/otp/verify', {
-    challenge_id: challengeId,
-    otp_code: otpCode,
-  });
+function toAuthError(error: { message?: string; status?: number } | null): Error {
+  const message = error?.message || 'Authentication request failed.';
+  const lower = message.toLowerCase();
+  if (lower.includes('rate') || error?.status === 429) return new Error('Too many attempts. Please wait and try again.');
+  if (lower.includes('invalid') && lower.includes('otp')) return new Error('The OTP is incorrect or expired.');
+  if (lower.includes('expired')) return new Error('The OTP has expired. Request a new code.');
+  if (lower.includes('already') || lower.includes('duplicate') || lower.includes('unique')) return new Error('That account information is already in use.');
+  if (lower.includes('weak password')) return new Error('Choose a stronger password.');
+  return new Error(message);
 }
 
-export async function checkSignupAvailability(email: string, username: string): Promise<{ success: boolean; email_available: boolean; username_available: boolean }> {
-  return authRequest('/api/auth/availability', {
-    email,
-    username,
-  });
+export function persistAuthSession(session: { access_token: string; refresh_token: string; expires_in: number; user: AuthUser }): void {
+  window.localStorage.setItem('access_token', session.access_token);
+  window.localStorage.setItem('refresh_token', session.refresh_token);
+  window.localStorage.setItem('user', JSON.stringify(session.user));
 }
 
-export async function signupWithWizard(payload: SignupPayload): Promise<AuthSuccessResponse> {
-  return authRequest('/api/auth/signup', payload);
+export async function getCurrentSession() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw toAuthError(error);
+  return data.session;
 }
 
 export async function loginWithPassword(identity: string, password: string): Promise<AuthSuccessResponse> {
-  return authRequest('/api/auth/login', {
-    identity,
-    password,
+  const value = identity.trim();
+  if (!value || !password) throw new Error('Email/phone and password are required.');
+  const credentials = value.includes('@') ? { email: value.toLowerCase(), password } : { phone: value, password };
+  const { data, error } = await supabase.auth.signInWithPassword(credentials);
+  if (error || !data.session || !data.user) throw toAuthError(error);
+  const username = String(data.user.user_metadata?.username || data.user.email?.split('@')[0] || data.user.phone || 'user');
+  const response = { success: true, access_token: data.session.access_token, refresh_token: data.session.refresh_token, expires_in: data.session.expires_in || 3600, user: { id: data.user.id, email: data.user.email, username, phone: data.user.phone } };
+  persistAuthSession(response);
+  return response;
+}
+
+export async function sendSignupOtp(countryCode: string, phoneNumber: string): Promise<{ phone: string; expiresIn: number }> {
+  const phone = normalizePhone(countryCode, phoneNumber);
+  const { error } = await supabase.auth.signInWithOtp({
+    phone,
+    options: {
+      shouldCreateUser: true,
+    },
   });
+  if (error) throw toAuthError(error);
+  return { phone, expiresIn: 60 };
 }
 
-export async function requestPasswordReset(payload: { mode: ForgotPasswordMode; email?: string; country_code?: string; phone_number?: string }): Promise<ForgotPasswordResponse> {
-  return authRequest('/api/auth/forgot-password', payload);
+export async function verifySignupOtp(phone: string, otpCode: string): Promise<AuthSuccessResponse> {
+  if (!/^\d{6}$/.test(otpCode)) throw new Error('Enter the 6-digit OTP.');
+  const { data, error } = await supabase.auth.verifyOtp({ phone, token: otpCode, type: 'sms' });
+  if (error || !data.session || !data.user) throw toAuthError(error);
+  const username = String(data.user.user_metadata?.username || data.user.phone || 'user');
+  const response = { success: true, access_token: data.session.access_token, refresh_token: data.session.refresh_token, expires_in: data.session.expires_in || 3600, user: { id: data.user.id, email: data.user.email, username, phone: data.user.phone } };
+  return response;
 }
 
-export async function verifyPasswordResetOtp(challengeId: string, otpCode: string): Promise<{ success: boolean; challenge_id: string; phone: string; message: string }> {
-  return verifySignupOtp(challengeId, otpCode);
-}
+export async function completeSignup(params: { username: string; email: string; password: string; phone: string; legalAccepted: boolean }): Promise<AuthSuccessResponse> {
+  if (!params.legalAccepted) throw new Error('You must accept the Terms & Conditions and Privacy Policy.');
+  const username = validateUsername(params.username);
+  const email = params.email.trim().toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Enter a valid email address.');
+  validatePassword(params.password);
 
-export function persistAuthSession(response: AuthSuccessResponse): void {
-  try {
-    window.localStorage.setItem('access_token', response.access_token);
-    window.localStorage.setItem('refresh_token', response.refresh_token);
-    window.localStorage.setItem('user', JSON.stringify(response.user));
-  } catch (error) {
-    console.error('Failed to persist auth session', error);
-    throw new Error('Unable to persist secure session on this device.');
+  const { data: existing, error: lookupError } = await supabase.from('profiles').select('user_id,username').eq('username', username).maybeSingle();
+  if (lookupError && lookupError.code !== 'PGRST116') throw new Error('Unable to validate username right now.');
+  if (existing?.user_id) throw new Error('Username is already taken.');
+
+  const { data: userData, error: userError } = await supabase.auth.updateUser({
+    email,
+    password: params.password,
+    data: {
+      username,
+      mobile: params.phone,
+      terms_accepted: true,
+      privacy_accepted: true,
+      legal_accepted_at: new Date().toISOString(),
+    },
+  });
+  if (userError || !userData.user) throw toAuthError(userError);
+
+  const { error: profileError } = await supabase.from('profiles').update({
+    username,
+    full_name: username,
+    mobile: params.phone,
+  }).eq('user_id', userData.user.id);
+  if (profileError) {
+    if (profileError.code === '23505') throw new Error('Username is already taken.');
+    throw new Error('Account profile could not be completed. Please try again.');
   }
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError || !sessionData.session) throw new Error('Account was created but the session could not be established. Please log in.');
+  const response = { success: true, access_token: sessionData.session.access_token, refresh_token: sessionData.session.refresh_token, expires_in: sessionData.session.expires_in || 3600, user: { id: userData.user.id, email: userData.user.email, username, phone: userData.user.phone || params.phone } };
+  persistAuthSession(response);
+  return response;
+}
+
+export async function signInWithGoogle(): Promise<void> {
+  const redirectTo = `${window.location.origin}/`;
+  const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
+  if (error) throw toAuthError(error);
+}
+
+export async function signOut(): Promise<void> {
+  const { error } = await supabase.auth.signOut();
+  window.localStorage.removeItem('user');
+  window.localStorage.removeItem('access_token');
+  window.localStorage.removeItem('refresh_token');
+  if (error) throw toAuthError(error);
+}
+
+export async function requestPasswordReset(email: string): Promise<void> {
+  const value = email.trim().toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(value)) throw new Error('Enter a valid email address.');
+  const { error } = await supabase.auth.resetPasswordForEmail(value, { redirectTo: `${window.location.origin}/forgot-password` });
+  if (error) throw toAuthError(error);
+}
+
+export async function updatePassword(password: string): Promise<void> {
+  validatePassword(password);
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw toAuthError(error);
 }
