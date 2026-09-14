@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from backend.services.supabase_db import insert_one, select_one, update_one
+from backend.services.supabase_db import insert_one, select_many, select_one, update_one
 from backend.services.supabase_storage import upload_bytes
 
 router = APIRouter(prefix="/api/stories", tags=["Stories"])
@@ -59,6 +59,37 @@ async def _decorate(stories: list[dict]) -> list[dict]:
         row["media_url"] = await _signed_url(story["media_name"])
         result.append(row)
     return result
+
+
+async def _can_view_story(viewer_id: str, story: dict) -> bool:
+    """Enforce story visibility explicitly because service-role reads bypass RLS."""
+    owner_id = str(story.get("user_id") or "")
+    viewer_id = str(viewer_id or "")
+    if not owner_id or not viewer_id:
+        return False
+    if owner_id == viewer_id:
+        return True
+
+    owner = await select_one("profiles", filters={"user_id": owner_id}, columns="user_id,is_private")
+    if not owner:
+        return False
+
+    blocked = await select_one("blocks", filters={"blocker_id": viewer_id, "blocked_id": owner_id}, columns="blocker_id")
+    if blocked:
+        return False
+    blocked_reverse = await select_one("blocks", filters={"blocker_id": owner_id, "blocked_id": viewer_id}, columns="blocker_id")
+    if blocked_reverse:
+        return False
+
+    if not bool(owner.get("is_private")):
+        return True
+
+    follow = await select_one(
+        "follows",
+        filters={"follower_id": viewer_id, "following_id": owner_id, "status": "accepted"},
+        columns="follower_id",
+    )
+    return follow is not None
 
 
 @router.post("/upload")
@@ -120,19 +151,22 @@ async def story_feed(x_user_id: Optional[str] = Header(default=None)):
         response = await client.get(f"{SUPABASE_URL}/rest/v1/stories", headers={"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}"}, params=params)
     if response.status_code >= 400:
         raise HTTPException(status_code=502, detail="Unable to load stories")
-    return {"success": True, "stories": await _decorate(response.json())}
+    stories = [story for story in response.json() if await _can_view_story(str(x_user_id), story)]
+    return {"success": True, "stories": await _decorate(stories)}
 
 
 @router.post("/{story_id}/view")
 async def view_story(story_id: str, x_user_id: Optional[str] = Header(default=None)):
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
-    story = await select_one("stories", filters={"id": story_id}, columns="id,expires_at,deleted_at")
+    story = await select_one("stories", filters={"id": story_id}, columns="id,user_id,expires_at,deleted_at")
     if not story or story.get("deleted_at"):
         raise HTTPException(status_code=404, detail="Story not found")
     expires_at = datetime.fromisoformat(str(story["expires_at"]).replace("Z", "+00:00"))
     if expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=410, detail="Story expired")
+    if not await _can_view_story(str(x_user_id), story):
+        raise HTTPException(status_code=403, detail="Story unavailable")
     try:
         await insert_one("story_views", {"story_id": story_id, "user_id": str(x_user_id)})
     except Exception as exc:
@@ -150,4 +184,6 @@ async def get_story(story_id: str, x_user_id: Optional[str] = Header(default=Non
         raise HTTPException(status_code=404, detail="Story not found")
     if datetime.fromisoformat(str(story["expires_at"]).replace("Z", "+00:00")) <= datetime.now(timezone.utc):
         raise HTTPException(status_code=410, detail="Story expired")
+    if not await _can_view_story(str(x_user_id), story):
+        raise HTTPException(status_code=403, detail="Story unavailable")
     return {"success": True, "story": (await _decorate([story]))[0]}
