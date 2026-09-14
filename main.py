@@ -29,6 +29,7 @@ from backend.services.push_notifications import PushNotificationError, push_noti
 from backend.routes.zero_knowledge import router as zero_knowledge_router
 from backend.routes.admin_oob_auth import router as admin_oob_auth_router
 from backend.routes.auth_v2 import router as auth_v2_router
+from backend.routes.stories_v2 import router as stories_v2_router
 from backend.core.security import hash_otp, verify_otp_hash
 
 app = FastAPI(
@@ -45,6 +46,7 @@ app.include_router(push_notifications_router)
 app.include_router(zero_knowledge_router)
 app.include_router(admin_oob_auth_router)
 app.include_router(auth_v2_router)
+app.include_router(stories_v2_router)
 
 limiter = Limiter(
     key_func=get_remote_address,
@@ -68,7 +70,7 @@ async def backend_request_guard(request: Request, call_next):
         except ValueError:
             body_size = 0
         content_type = request.headers.get("content-type", "").lower()
-        max_body = 1 * 1024 * 1024 if "application/json" in content_type else 2 * 1024 * 1024
+        max_body = 1 * 1024 * 1024 if "application/json" in content_type else 25 * 1024 * 1024
         if body_size > max_body:
             return JSONResponse(status_code=413, content={"success": False, "detail": "Request payload is too large", "request_id": request_id})
     request.state.request_id = request_id
@@ -100,6 +102,25 @@ PUBLIC_API_PATHS = {
 
 
 async def _validate_supabase_access_token(token: str) -> str:
+    # Accept the application's own revocable JWT first. It is checked against the
+    # persistent auth_sessions row by get_current_user and never exposed as a secret.
+    from backend.core.security import decode_access_token
+    if os.getenv("JWT_SECRET", ""):
+        try:
+            payload = decode_access_token(token)
+            session = await supabase_db_request("GET", "auth_sessions", query=f"?select=user_id,expires_at,revoked_at&token_jti=eq.{payload['jti']}&limit=1")
+            row = session[0] if session else None
+            if not row or row.get("revoked_at") or str(row.get("user_id")) != str(payload.get("sub")):
+                raise HTTPException(status_code=401, detail="Invalid or revoked session")
+            expiry = _parse_datetime(row.get("expires_at"))
+            if expiry and expiry <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=401, detail="Session expired")
+            return str(payload["sub"])
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
         raise HTTPException(status_code=503, detail="Authentication service is not configured")
     if not token or len(token) > 8192:
