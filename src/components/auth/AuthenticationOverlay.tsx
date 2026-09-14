@@ -1,0 +1,278 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../../supabase/supabaseClient';
+import { completeSignup, getCurrentSession, loginWithPassword, persistAuthSession, sendSignupOtp, signInWithGoogle, signOut, updatePassword, verifySignupOtp } from '../../utils/authApi';
+
+type Mode = 'login' | 'signup' | 'reset-profile';
+
+const glass: React.CSSProperties = {
+  width: '100%',
+  maxWidth: 430,
+  padding: 28,
+  borderRadius: 24,
+  background: 'rgba(16, 22, 38, 0.78)',
+  border: '1px solid rgba(148, 163, 184, 0.22)',
+  boxShadow: '0 24px 80px rgba(0,0,0,.45)',
+  backdropFilter: 'blur(24px)',
+  WebkitBackdropFilter: 'blur(24px)',
+};
+
+const input: React.CSSProperties = {
+  width: '100%',
+  height: 48,
+  borderRadius: 12,
+  border: '1px solid rgba(148,163,184,.22)',
+  background: 'rgba(15,23,42,.72)',
+  color: '#f8fafc',
+  padding: '0 14px',
+  outline: 'none',
+  boxSizing: 'border-box',
+};
+
+const primary: React.CSSProperties = {
+  width: '100%',
+  minHeight: 48,
+  border: 0,
+  borderRadius: 12,
+  background: 'linear-gradient(135deg,#06b6d4,#2563eb)',
+  color: '#fff',
+  fontWeight: 800,
+  cursor: 'pointer',
+};
+
+function friendly(error: unknown): string {
+  return error instanceof Error ? error.message : 'Authentication request failed. Please try again.';
+}
+
+function storeSession(session: NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>, username: string) {
+  persistAuthSession({
+    success: true,
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_in: session.expires_in || 3600,
+    user: { id: session.user.id, email: session.user.email, username, phone: session.user.phone },
+  });
+}
+
+export function AuthenticationOverlay() {
+  const [visible, setVisible] = useState(true);
+  const [mode, setMode] = useState<Mode>('login');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [phone, setPhone] = useState('');
+  const [countryCode, setCountryCode] = useState('+91');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [legalAccepted, setLegalAccepted] = useState(false);
+  const [googleNeedsProfile, setGoogleNeedsProfile] = useState(false);
+
+  const phoneE164 = useMemo(() => {
+    const cc = countryCode.replace(/\D/g, '');
+    const digits = phone.replace(/\D/g, '');
+    return cc && digits ? `+${cc}${digits}` : '';
+  }, [countryCode, phone]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const bootstrap = async () => {
+      try {
+        const session = await getCurrentSession();
+        if (!mounted || !session) return;
+        const { data: profile } = await supabase.from('profiles').select('username').eq('user_id', session.user.id).maybeSingle();
+        const existingUsername = String(profile?.username || session.user.user_metadata?.username || '');
+        if (existingUsername) {
+          storeSession(session, existingUsername);
+          setVisible(false);
+          return;
+        }
+        setGoogleNeedsProfile(Boolean(session.user.app_metadata?.provider === 'google' || session.user.identities?.some((identity) => identity.provider === 'google')));
+        setMode('reset-profile');
+      } catch {
+        // No active Supabase session; show the authentication UI.
+      }
+    };
+    void bootstrap();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        setVisible(true);
+        return;
+      }
+      const finish = async () => {
+        const { data: profile } = await supabase.from('profiles').select('username').eq('user_id', session.user.id).maybeSingle();
+        const existingUsername = String(profile?.username || session.user.user_metadata?.username || '');
+        if (existingUsername) {
+          storeSession(session, existingUsername);
+          setVisible(false);
+        } else {
+          setMode('reset-profile');
+          setGoogleNeedsProfile(Boolean(session.user.identities?.some((identity) => identity.provider === 'google')));
+          setVisible(true);
+        }
+      };
+      void finish();
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    const poll = window.setInterval(() => {
+      const hasToken = Boolean(window.localStorage.getItem('access_token'));
+      setVisible(!hasToken);
+    }, 500);
+    return () => window.clearInterval(poll);
+  }, [visible]);
+
+  if (!visible) return null;
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setError('');
+    setNotice('');
+    if (next === 'signup') {
+      setOtpSent(false);
+      setOtpVerified(false);
+      setOtp('');
+    }
+  };
+
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const response = await loginWithPassword(identifier, password);
+      storeSession(await getCurrentSession() as NonNullable<Awaited<ReturnType<typeof getCurrentSession>>>, response.user.username || identifier);
+      window.location.reload();
+    } catch (e) { setError(friendly(e)); } finally { setBusy(false); }
+  };
+
+  const requestOtp = async () => {
+    if (cooldown > 0) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      if (!phoneE164 || phoneE164.length < 10 || phoneE164.length > 16) throw new Error('Enter a valid phone number.');
+      await sendSignupOtp(countryCode, phone);
+      setOtpSent(true); setCooldown(60); setNotice('OTP sent. Enter the 6-digit code.');
+    } catch (e) { setError(friendly(e)); } finally { setBusy(false); }
+  };
+
+  const verifyOtp = async () => {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await verifySignupOtp(phoneE164, otp);
+      setOtpVerified(true); setNotice('Phone verified. Complete your account details below.');
+    } catch (e) { setError(friendly(e)); } finally { setBusy(false); }
+  };
+
+  const createAccount = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!otpVerified) { setError('Verify your phone number before creating the account.'); return; }
+    if (!legalAccepted) { setError('You must agree to the Terms & Conditions and Privacy Policy.'); return; }
+    if (signupPassword !== confirmPassword) { setError('Passwords do not match.'); return; }
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const response = await completeSignup({ username, email, password: signupPassword, phone: phoneE164, legalAccepted });
+      persistAuthSession(response);
+      window.location.reload();
+    } catch (e) { setError(friendly(e)); } finally { setBusy(false); }
+  };
+
+  const completeGoogleProfile = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!legalAccepted) { setError('You must agree to the Terms & Conditions and Privacy Policy.'); return; }
+    setBusy(true); setError('');
+    try {
+      const session = await getCurrentSession();
+      if (!session) throw new Error('Your Google session is no longer active. Please sign in again.');
+      const cleanUsername = username.trim().toLowerCase();
+      if (!/^[a-z0-9_]{3,30}$/.test(cleanUsername)) throw new Error('Username must be 3–30 characters using letters, numbers or underscores.');
+      const { data: existing } = await supabase.from('profiles').select('user_id').eq('username', cleanUsername).maybeSingle();
+      if (existing?.user_id && existing.user_id !== session.user.id) throw new Error('Username is already taken.');
+      const { error: updateError } = await supabase.auth.updateUser({ data: { username: cleanUsername, terms_accepted: true, privacy_accepted: true, legal_accepted_at: new Date().toISOString() } });
+      if (updateError) throw updateError;
+      const { error: profileError } = await supabase.from('profiles').update({ username: cleanUsername, full_name: session.user.user_metadata?.full_name || cleanUsername }).eq('user_id', session.user.id);
+      if (profileError) throw profileError;
+      storeSession(session, cleanUsername);
+      window.location.reload();
+    } catch (e) { setError(friendly(e)); } finally { setBusy(false); }
+  };
+
+  const pageStyle: React.CSSProperties = {
+    position: 'fixed', inset: 0, zIndex: 10000, overflowY: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 20, background: 'radial-gradient(circle at 20% 10%,rgba(6,182,212,.12),transparent 35%), radial-gradient(circle at 80% 90%,rgba(99,102,241,.12),transparent 35%), #070b14', color: '#f8fafc', fontFamily: 'Inter,system-ui,sans-serif',
+  };
+
+  return <div style={pageStyle}>
+    <div style={glass}>
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+        <div style={{ fontSize: 11, letterSpacing: '.22em', color: '#67e8f9', fontWeight: 800 }}>OMNIX</div>
+        <h1 style={{ margin: '8px 0 6px', fontSize: 28, letterSpacing: '-.04em' }}>{mode === 'login' ? 'Welcome back' : mode === 'signup' ? 'Create your account' : 'Finish your profile'}</h1>
+        <p style={{ margin: 0, color: '#94a3b8', fontSize: 13 }}>{mode === 'signup' ? (otpVerified ? 'Phone verified — now complete your account.' : 'Your phone is verified first. Your account details come next.') : 'Secure authentication for your OMNIX account.'}</p>
+      </div>
+
+      {mode === 'login' && <form onSubmit={handleLogin}>
+        <input style={{ ...input, marginBottom: 12 }} value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder="Email or phone number" autoComplete="username" />
+        <input style={{ ...input, marginBottom: 10 }} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" autoComplete="current-password" />
+        <button type="button" onClick={() => { window.location.href = '/forgot-password'; }} style={{ border: 0, background: 'transparent', color: '#67e8f9', padding: '4px 0 16px', cursor: 'pointer' }}>Forgot Password?</button>
+        <button style={primary} disabled={busy}>{busy ? 'Signing in…' : 'Log In'}</button>
+        <button type="button" onClick={() => void signInWithGoogle()} style={{ ...primary, marginTop: 10, background: 'rgba(255,255,255,.07)', border: '1px solid rgba(148,163,184,.22)' }}>Continue with Google</button>
+        <div style={{ textAlign: 'center', marginTop: 18, color: '#94a3b8', fontSize: 13 }}>New to OMNIX? <button type="button" onClick={() => switchMode('signup')} style={{ color: '#67e8f9', border: 0, background: 'transparent', cursor: 'pointer', fontWeight: 800 }}>Sign Up</button></div>
+      </form>}
+
+      {mode === 'signup' && <form onSubmit={createAccount}>
+        {!otpVerified ? <>
+          <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 7 }}>STEP 1 — PHONE NUMBER</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '92px 1fr', gap: 8 }}>
+            <input style={input} value={countryCode} onChange={(e) => setCountryCode(e.target.value)} placeholder="+91" inputMode="tel" />
+            <input style={input} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone number" inputMode="tel" autoComplete="tel" />
+          </div>
+          <button type="button" onClick={() => void requestOtp()} disabled={busy || cooldown > 0} style={{ ...primary, marginTop: 12 }}>{busy ? 'Sending OTP…' : cooldown > 0 ? `Resend in ${cooldown}s` : otpSent ? 'Resend OTP' : 'Send OTP'}</button>
+          {otpSent && <div style={{ marginTop: 18 }}>
+            <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 7 }}>STEP 2 — OTP VERIFICATION</label>
+            <input style={{ ...input, letterSpacing: '.35em', textAlign: 'center', fontSize: 20 }} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" inputMode="numeric" autoComplete="one-time-code" />
+            <button type="button" onClick={() => void verifyOtp()} disabled={busy || otp.length !== 6} style={{ ...primary, marginTop: 10 }}>{busy ? 'Verifying…' : 'Verify OTP'}</button>
+          </div>}
+        </> : <>
+          <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(34,197,94,.09)', color: '#86efac', fontSize: 12, marginBottom: 14 }}>✓ Phone verification successful</div>
+          <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 7 }}>STEP 3 — ACCOUNT DETAILS</label>
+          <input style={{ ...input, marginBottom: 10 }} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoComplete="username" />
+          <input style={{ ...input, marginBottom: 10 }} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" autoComplete="email" />
+          <input style={{ ...input, marginBottom: 10 }} type="password" value={signupPassword} onChange={(e) => setSignupPassword(e.target.value)} placeholder="Password (8+ characters)" autoComplete="new-password" />
+          <input style={{ ...input, marginBottom: 12 }} type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Confirm password" autoComplete="new-password" />
+          <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', color: '#cbd5e1', fontSize: 12, lineHeight: 1.5, marginBottom: 14 }}><input type="checkbox" checked={legalAccepted} onChange={(e) => setLegalAccepted(e.target.checked)} style={{ marginTop: 3 }} /><span>I agree to the <a href="/terms" style={{ color: '#67e8f9' }}>Terms & Conditions</a> and <a href="/privacy" style={{ color: '#67e8f9' }}>Privacy Policy</a>.</span></label>
+          <button style={{ ...primary, opacity: legalAccepted ? 1 : .55 }} disabled={busy || !legalAccepted}>{busy ? 'Creating account…' : 'Sign Up'}</button>
+          <button type="button" onClick={() => { setOtpVerified(false); setOtpSent(true); setOtp(''); setError(''); }} style={{ width: '100%', marginTop: 10, minHeight: 44, borderRadius: 12, border: '1px solid rgba(148,163,184,.22)', background: 'transparent', color: '#cbd5e1' }}>Change phone / reverify</button>
+        </>}
+        <div style={{ textAlign: 'center', marginTop: 18, color: '#94a3b8', fontSize: 13 }}>Already have an account? <button type="button" onClick={() => switchMode('login')} style={{ color: '#67e8f9', border: 0, background: 'transparent', cursor: 'pointer', fontWeight: 800 }}>Log In</button></div>
+      </form>}
+
+      {mode === 'reset-profile' && <form onSubmit={completeGoogleProfile}>
+        <p style={{ color: '#cbd5e1', fontSize: 13, lineHeight: 1.6, marginTop: 0 }}>{googleNeedsProfile ? 'Google authentication succeeded. Choose your OMNIX username before entering the app.' : 'Choose the username that will identify your OMNIX profile.'}</p>
+        <input style={{ ...input, marginBottom: 12 }} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoComplete="username" />
+        <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', color: '#cbd5e1', fontSize: 12, lineHeight: 1.5, marginBottom: 14 }}><input type="checkbox" checked={legalAccepted} onChange={(e) => setLegalAccepted(e.target.checked)} style={{ marginTop: 3 }} /><span>I agree to the <a href="/terms" style={{ color: '#67e8f9' }}>Terms & Conditions</a> and <a href="/privacy" style={{ color: '#67e8f9' }}>Privacy Policy</a>.</span></label>
+        <button style={{ ...primary, opacity: legalAccepted ? 1 : .55 }} disabled={busy || !legalAccepted}>{busy ? 'Saving…' : 'Continue to OMNIX'}</button>
+        <button type="button" onClick={() => void signOut()} style={{ width: '100%', marginTop: 10, minHeight: 44, borderRadius: 12, border: '1px solid rgba(148,163,184,.22)', background: 'transparent', color: '#cbd5e1' }}>Cancel</button>
+      </form>}
+
+      {(error || notice) && <div aria-live="polite" style={{ marginTop: 16, padding: '10px 12px', borderRadius: 10, background: error ? 'rgba(239,68,68,.1)' : 'rgba(34,197,94,.08)', color: error ? '#fca5a5' : '#86efac', fontSize: 12 }}>{error || notice}</div>}
+      <div style={{ marginTop: 18, textAlign: 'center', fontSize: 11, color: '#64748b' }}>Your password is handled by Supabase Auth; OMNIX does not store plaintext passwords.</div>
+    </div>
+  </div>;
+}
