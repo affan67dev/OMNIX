@@ -116,7 +116,6 @@ export function Stories({ username }: { username: string }) {
         body: JSON.stringify({
           media_name: upload.path,
           media_type: upload.media_type,
-          media_type: selectedMediaType,
           caption,
           mentions: selectedMentions,
           location_name: selectedLocation,

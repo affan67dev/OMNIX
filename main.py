@@ -30,8 +30,7 @@ from backend.routes.zero_knowledge import router as zero_knowledge_router
 from backend.routes.admin_oob_auth import router as admin_oob_auth_router
 from backend.routes.auth_v2 import router as auth_v2_router
 from backend.routes.stories_v2 import router as stories_v2_router
-from backend.core.security import hash_otp, verify_otp_hash
-from backend.routes.stories_v2 import router as stories_v2_router
+from backend.routes.reels_v2 import router as reels_v2_router
 from backend.core.security import hash_otp, verify_otp_hash
 
 app = FastAPI(
@@ -49,6 +48,7 @@ app.include_router(zero_knowledge_router)
 app.include_router(admin_oob_auth_router)
 app.include_router(auth_v2_router)
 app.include_router(stories_v2_router)
+app.include_router(reels_v2_router)
 
 limiter = Limiter(
     key_func=get_remote_address,
