@@ -45,4 +45,24 @@ export async function apiJson<T>(path: string, options: RequestOptions = {}): Pr
   return payload as T;
 }
 
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const url = new URL(`${API_BASE}${path}`);
+  const form = new FormData();
+  form.append('file', file);
+  const headers = new Headers();
+  try {
+    const accessToken = window.localStorage.getItem('access_token');
+    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+  } catch (error) {
+    console.error('Unable to read access token', error);
+  }
+  const response = await fetch(url.toString(), { method: 'POST', headers, body: form });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = payload && typeof payload === 'object' && 'detail' in payload ? String(payload.detail) : `Upload failed with status ${response.status}`;
+    throw new Error(detail);
+  }
+  return payload as T;
+}
+
 export { API_BASE };

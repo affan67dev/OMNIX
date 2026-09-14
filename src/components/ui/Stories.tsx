@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { apiJson } from '../../utils/socialApi';
+import { apiJson, apiUpload } from '../../utils/socialApi';
 
 type StoryItem = {
   id: string;
@@ -27,6 +27,7 @@ export function Stories({ username }: { username: string }) {
   const [stories, setStories] = useState<StoryItem[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
   const [selectedMediaName, setSelectedMediaName] = useState('');
+  const [selectedMediaFile, setSelectedMediaFile] = useState<File | null>(null);
   const [selectedMediaType, setSelectedMediaType] = useState<'image' | 'video'>('image');
   const [caption, setCaption] = useState('');
   const [musicSearch, setMusicSearch] = useState('');
@@ -89,6 +90,7 @@ export function Stories({ username }: { username: string }) {
     const file = event.target.files?.[0];
     if (!file) return;
     setSelectedMediaName(file.name);
+    setSelectedMediaFile(file);
     setSelectedMediaType(file.type.startsWith('video') ? 'video' : 'image');
     setEditorOpen(true);
     setStatus('');
@@ -107,10 +109,13 @@ export function Stories({ username }: { username: string }) {
     setBusy(true);
     setStatus('Publishing story…');
     try {
+      if (!selectedMediaFile) throw new Error('Selected media is no longer available. Please choose it again.');
+      const upload = await apiUpload<{ success: boolean; path: string; media_type: 'image' | 'video' }>('/api/stories/upload', selectedMediaFile);
       await apiJson('/api/stories', {
         method: 'POST',
         body: JSON.stringify({
-          media_name: selectedMediaName,
+          media_name: upload.path,
+          media_type: upload.media_type,
           media_type: selectedMediaType,
           caption,
           mentions: selectedMentions,
@@ -126,6 +131,7 @@ export function Stories({ username }: { username: string }) {
       setStatus('Story published. It will auto-expire in 24 hours.');
       setEditorOpen(false);
       setSelectedMediaName('');
+      setSelectedMediaFile(null);
       setCaption('');
       setSelectedMentions([]);
       setSelectedLocation('');
