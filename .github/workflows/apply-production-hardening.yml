@@ -25,6 +25,7 @@ jobs:
           python scripts/beta_hardening_v4.py
           python scripts/beta_hardening_v5.py
           python scripts/beta_hardening_v6.py
+          python scripts/beta_hardening_v7.py
       - name: Validate Python syntax
         run: python -m compileall -q main.py backend scripts
       - name: Install backend test dependencies
@@ -42,7 +43,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git diff --cached --quiet || git commit -m 'feat: production performance and request hardening'
+          git diff --cached --quiet || git commit -m 'feat: persist Supabase stories and storage integration'
           git push
       - name: Verify clean working tree
         run: |
