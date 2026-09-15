@@ -40,7 +40,7 @@ export function PremiumPaywallModal({ open, product, subscription, busy, statusM
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
             <div>
               <div style={{ fontSize: '12px', letterSpacing: '0.18em', color: '#7dd3fc', textTransform: 'uppercase' }}>Premium</div>
-              <div style={{ fontSize: '28px', fontWeight: 900, color: '#f8fafc' }}>Upgrade to ByteChat Premium</div>
+              <div style={{ fontSize: '28px', fontWeight: 900, color: '#f8fafc' }}>Upgrade to OMNIX Premium</div>
             </div>
             <button type="button" onClick={onClose} style={{ borderRadius: '999px', border: '1px solid #475569', background: 'transparent', color: '#f8fafc', width: '42px', height: '42px', cursor: 'pointer' }}>
               ✕
@@ -63,7 +63,7 @@ export function PremiumPaywallModal({ open, product, subscription, busy, statusM
           <div style={{ borderRadius: '20px', border: '1px solid rgba(125, 211, 252, 0.24)', background: 'rgba(8, 47, 73, 0.48)', padding: '16px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '18px', fontWeight: 800, color: '#f8fafc' }}>{product?.title ?? 'ByteChat Premium'}</div>
+                <div style={{ fontSize: '18px', fontWeight: 800, color: '#f8fafc' }}>{product?.title ?? 'OMNIX Premium'}</div>
                 <div style={{ fontSize: '13px', color: '#cbd5e1' }}>{product?.description ?? 'Monthly subscription billed via Google Play.'}</div>
               </div>
               <div style={{ textAlign: 'right' }}>

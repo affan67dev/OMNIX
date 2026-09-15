@@ -25,13 +25,13 @@ export function LegalDocumentView({ type }: { type: LegalDocumentType }) {
         <p style={{ color: '#475569', marginTop: '8px' }}>Last updated: 2026-07-21</p>
 
         <h2 style={{ marginTop: '18px', fontSize: '17px' }}>1. What We Collect</h2>
-        <p>We collect account identity information required to operate ByteChat, including username, email, verified phone metadata, authentication artifacts, and security settings.</p>
+        <p>We collect account identity information required to operate OMNIX, including username, email, verified phone metadata, authentication artifacts, and security settings.</p>
 
         <h2 style={{ marginTop: '18px', fontSize: '17px' }}>2. How We Use Data</h2>
         <p>Data is processed for account access, messaging delivery, fraud prevention, abuse moderation, legal compliance, subscription verification, and service quality improvement.</p>
 
         <h2 style={{ marginTop: '18px', fontSize: '17px' }}>3. Encryption & Security</h2>
-        <p>ByteChat applies transport encryption and secure storage controls. End-to-end encrypted payload handling and local lock controls are implemented where supported by your device.</p>
+        <p>OMNIX applies transport encryption and secure storage controls. End-to-end encrypted payload handling and local lock controls are implemented where supported by your device.</p>
 
         <h2 style={{ marginTop: '18px', fontSize: '17px' }}>4. App Store & Platform Compliance</h2>
         <p>For Google Play and Apple App Store distribution, we process only data required for app functionality, security, billing validation, and policy enforcement. Platform account and payment services are governed by their own terms.</p>
@@ -60,7 +60,7 @@ export function LegalDocumentView({ type }: { type: LegalDocumentType }) {
       <p style={{ color: '#475569', marginTop: '8px' }}>Last updated: 2026-07-21</p>
 
       <h2 style={{ marginTop: '18px', fontSize: '17px' }}>1. Acceptance of Terms</h2>
-      <p>By creating an account or using ByteChat (OMNIX), you agree to these terms and our Privacy Policy. If you do not agree, do not use the service.</p>
+      <p>By creating an account or using OMNIX (OMNIX), you agree to these terms and our Privacy Policy. If you do not agree, do not use the service.</p>
 
       <h2 style={{ marginTop: '18px', fontSize: '17px' }}>2. Eligibility & Account Responsibility</h2>
       <p>You are responsible for your credentials, account activity, and lawful use. You must provide accurate registration information and keep it updated.</p>
@@ -69,7 +69,7 @@ export function LegalDocumentView({ type }: { type: LegalDocumentType }) {
       <p>Prohibited behavior includes illegal activity, hateful or violent threats, child exploitation, non-consensual sexual content, malware distribution, impersonation, and coordinated abuse.</p>
 
       <h2 style={{ marginTop: '18px', fontSize: '17px' }}>4. User-Generated Content License</h2>
-      <p>You retain ownership of your content but grant ByteChat a limited, worldwide, royalty-free license to host, process, moderate, and display content for service operation, abuse prevention, and legal compliance.</p>
+      <p>You retain ownership of your content but grant OMNIX a limited, worldwide, royalty-free license to host, process, moderate, and display content for service operation, abuse prevention, and legal compliance.</p>
 
       <h2 style={{ marginTop: '18px', fontSize: '17px' }}>5. Moderation & Enforcement</h2>
       <p>We may remove content, restrict features, suspend sessions, or terminate accounts to enforce safety, legal duties, and platform policy compliance.</p>
@@ -84,10 +84,10 @@ export function LegalDocumentView({ type }: { type: LegalDocumentType }) {
       <p>Apple and Google are not responsible for service content, support obligations, dispute handling, or claims arising from platform misuse. App-store terms apply separately to purchases and device-level permissions.</p>
 
       <h2 style={{ marginTop: '18px', fontSize: '17px' }}>9. Liability Limitations</h2>
-      <p>To the maximum extent allowed by law, ByteChat is provided on an "as is" basis without warranties. We are not liable for indirect, incidental, consequential, or punitive damages arising from your use.</p>
+      <p>To the maximum extent allowed by law, OMNIX is provided on an "as is" basis without warranties. We are not liable for indirect, incidental, consequential, or punitive damages arising from your use.</p>
 
       <h2 style={{ marginTop: '18px', fontSize: '17px' }}>10. User Liability & Indemnity</h2>
-      <p>You are solely responsible for content and actions on your account and agree to indemnify ByteChat against claims, losses, and legal costs resulting from your misuse or policy violations.</p>
+      <p>You are solely responsible for content and actions on your account and agree to indemnify OMNIX against claims, losses, and legal costs resulting from your misuse or policy violations.</p>
 
       <h2 style={{ marginTop: '18px', fontSize: '17px' }}>11. Policy Updates</h2>
       <p>We may update these terms for product, legal, or safety reasons. Continued use after updates constitutes acceptance of the revised terms.</p>

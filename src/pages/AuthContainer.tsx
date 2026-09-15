@@ -28,7 +28,7 @@ export function AuthContainer() {
   const [authError, setAuthError] = useState('');
   const [offlineMode, setOfflineMode] = useState(false);
   const [legalModal, setLegalModal] = useState<LegalDocumentType | null>(null);
-  const [currentUsername, setCurrentUsername] = useState('operator_bite');
+  const [currentUsername, setCurrentUsername] = useState('omnix_user');
 
   const [signupStep, setSignupStep] = useState<1 | 2 | 3>(1);
   const [countryCode, setCountryCode] = useState('+1');
@@ -49,7 +49,7 @@ export function AuthContainer() {
   // Self Healing Feed Training Model State Log Tracker
   const [algoLogs, setAlgoLogs] = useState<string[]>(['Algorithm Initialized: Passive State Listening...']);
 
-  const targetUsername = currentUsername.trim() || 'operator_bite';
+  const targetUsername = currentUsername.trim() || 'omnix_user';
 
   const clearCorruptLocalState = () => {
     try {
@@ -265,7 +265,7 @@ export function AuthContainer() {
     setTargetConversationId('');
     setIdentifier('');
     setPassword('');
-    setCurrentUsername('operator_bite');
+    setCurrentUsername('omnix_user');
     setAuthError('');
     setAuthBusy(false);
     setSignupStep(1);
@@ -286,7 +286,7 @@ export function AuthContainer() {
   };
 
   const triggerPostPermission = () => {
-    const userConfirm = window.confirm('BITE System Request:\n"Allow explicit secure system permission to view native phone storage gallery content safely?"');
+    const userConfirm = window.confirm('OMNIX System Request:\n"Allow explicit secure system permission to view native phone storage gallery content safely?"');
     if (userConfirm) {
       alert('✅ Storage pipeline connection authorized without leaking system location strings.');
     }
@@ -299,7 +299,7 @@ export function AuthContainer() {
   if (screen === 'dashboard' && appLocked) {
     return (
       <SecureLock
-        title="Unlock ByteChat"
+        title="Unlock OMNIX"
         busy={appLockBusy}
         error={appLockError}
         onBiometricUnlock={async () => {
@@ -341,7 +341,7 @@ export function AuthContainer() {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px',
             borderBottom: '1px solid #121212'
           }}>
-            <span style={{ fontSize: '22px', fontWeight: 'bold', fontStyle: 'italic', letterSpacing: '-0.5px' }}>BITE</span>
+            <span style={{ fontSize: '22px', fontWeight: 'bold', fontStyle: 'italic', letterSpacing: '-0.5px' }}>OMNIX</span>
             
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               {activeTab === 'profile' ? (
@@ -424,8 +424,8 @@ export function AuthContainer() {
   }
 
   const finalizeAuth = (usernameValue: string) => {
-    setCurrentUsername(usernameValue || 'operator_bite');
-    setIdentifier(usernameValue || 'operator_bite');
+    setCurrentUsername(usernameValue || 'omnix_user');
+    setIdentifier(usernameValue || 'omnix_user');
     setScreen('dashboard');
     setActiveTab('home');
     setAuthError('');
@@ -439,7 +439,7 @@ export function AuthContainer() {
       const identity = identifier.trim();
       const response = await loginWithPassword(identity, password);
       persistAuthSession(response);
-      finalizeAuth(response.user.username || identifier.trim() || 'operator_bite');
+      finalizeAuth(response.user.username || identifier.trim() || 'omnix_user');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Unable to login now');
     } finally {
@@ -558,8 +558,8 @@ export function AuthContainer() {
       boxSizing: 'border-box',
     }}>
       <div style={{ marginTop: '8px', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '34px', fontWeight: 900, letterSpacing: '0.08em', margin: 0 }}>CLOCKCHAT</h1>
-        <p style={{ margin: '6px 0 0', color: '#475569', fontSize: '13px' }}>ClockChat: Encrypted by Kript Engine</p>
+        <h1 style={{ fontSize: '34px', fontWeight: 900, letterSpacing: '0.08em', margin: 0 }}>OMNIX</h1>
+        <p style={{ margin: '6px 0 0', color: '#475569', fontSize: '13px' }}>OMNIX: Secure social experience</p>
       </div>
 
       <div style={{ width: '100%', maxWidth: '420px' }}>
@@ -682,8 +682,8 @@ export function AuthContainer() {
       </div>
 
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: '13px', color: '#334155', marginBottom: '4px', fontWeight: 700 }}>ClockChat: Encrypted by Kript Engine</div>
-        <div style={{ fontSize: '14px', color: '#334155', letterSpacing: '0.12em', fontWeight: 800 }}>From Kript Labs</div>
+        <div style={{ fontSize: '13px', color: '#334155', marginBottom: '4px', fontWeight: 700 }}>OMNIX: Secure social experience</div>
+        <div style={{ fontSize: '14px', color: '#334155', letterSpacing: '0.12em', fontWeight: 800 }}>OMNIX</div>
       </div>
 
       <LegalDocumentModal open={Boolean(legalModal)} type={legalModal ?? 'terms'} onClose={() => setLegalModal(null)} />
