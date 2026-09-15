@@ -29,6 +29,6 @@ try {
   console.error('Fatal startup render failure', error)
   const fallbackRoot = document.getElementById('root')
   if (fallbackRoot) {
-    fallbackRoot.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f8fafc;color:#0f172a;font-family:sans-serif;padding:20px;text-align:center;">ClockChat could not initialize. Please relaunch the app.</div>'
+    fallbackRoot.innerHTML = '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#ffffff;color:#0f172a;font-family:sans-serif;padding:20px;text-align:center;"><div><strong>OMNIX could not initialize.</strong><br>Please reload the application.</div></div>'
   }
 }
