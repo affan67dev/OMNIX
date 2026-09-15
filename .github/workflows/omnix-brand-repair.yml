@@ -1,0 +1,68 @@
+name: OMNIX active branding repair
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: "!startsWith(github.event.head_commit.message, 'chore(omnix): canonical active branding')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Repair active web branding only
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              'src/pages/AuthContainer.tsx': [
+                  ('operator_bite', 'omnix_user'),
+                  ('BITE System Request', 'OMNIX System Request'),
+                  ('Unlock ByteChat', 'Unlock OMNIX'),
+                  ('ClockChat: Encrypted by Kript Engine', 'OMNIX: Secure social experience'),
+                  ('From Kript Labs', 'OMNIX'),
+                  ('CLOCKCHAT', 'OMNIX'),
+                  ('BITE', 'OMNIX'),
+              ],
+              'src/components/legal/LegalDocuments.tsx': [
+                  ('ByteChat', 'OMNIX'),
+              ],
+              'src/components/settings/PremiumPaywallModal.tsx': [
+                  ('ByteChat Premium', 'OMNIX Premium'),
+              ],
+              'package.json': [
+                  ('"name": "omnix-shadow"', '"name": "omnix"'),
+              ],
+          }
+
+          changed = []
+          for name, pairs in replacements.items():
+              path = Path(name)
+              text = path.read_text(encoding='utf-8')
+              original = text
+              for old, new in pairs:
+                  text = text.replace(old, new)
+              if text != original:
+                  path.write_text(text, encoding='utf-8')
+                  changed.append(name)
+
+          if not changed:
+              raise SystemExit('No active branding changes were applied')
+
+          workflow = Path('.github/workflows/omnix-brand-repair.yml')
+          workflow.unlink(missing_ok=True)
+
+          print('Changed:', ', '.join(changed))
+      - name: Commit canonical repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/pages/AuthContainer.tsx src/components/legal/LegalDocuments.tsx src/components/settings/PremiumPaywallModal.tsx package.json .github/workflows/omnix-brand-repair.yml
+          git commit -m "chore(omnix): canonical active branding"
+          git push origin HEAD:main
