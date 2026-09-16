@@ -1,14 +1,18 @@
-const required = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY', 'VITE_API_BASE_URL'];
+const required = ['VITE_SUPABASE_URL', 'VITE_API_BASE_URL'];
 const privileged = ['VITE_SUPABASE_SERVICE_ROLE_KEY', 'VITE_SUPABASE_SERVICE_KEY'];
 const localhost = /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i;
 
 const strict = String(process.env.VALIDATE_PRODUCTION_WEB_ENV || '').toLowerCase() === 'true';
 if (!strict) {
-  console.log('Web environment contract deferred; production deployment will validate the actual Vercel Production environment.');
+  console.log('Web environment contract deferred; deployment validation must inspect the actual Vercel Production environment.');
   process.exit(0);
 }
 
 const missing = required.filter((name) => !String(process.env[name] || '').trim());
+if (!String(process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim()) {
+  missing.push('VITE_SUPABASE_PUBLISHABLE_KEY or VITE_SUPABASE_ANON_KEY');
+}
+
 const invalid = [];
 if (process.env.VITE_SUPABASE_URL && !/^https:\/\//i.test(process.env.VITE_SUPABASE_URL)) invalid.push('VITE_SUPABASE_URL must use HTTPS');
 if (process.env.VITE_API_BASE_URL && localhost.test(process.env.VITE_API_BASE_URL)) invalid.push('VITE_API_BASE_URL points to localhost/127.0.0.1');
