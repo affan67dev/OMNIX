@@ -52,6 +52,9 @@ jobs:
       - name: Pull production Vercel environment
         run: npx --yes vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production --token="$VERCEL_TOKEN"
 
+      - name: Validate production web environment
+        run: npm run validate:web-env
+
       - name: Build the Vercel production artifact
         run: npx --yes vercel@${VERCEL_CLI_VERSION} build --prod --token="$VERCEL_TOKEN"
 
