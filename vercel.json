@@ -4,11 +4,11 @@
     "deploymentEnabled": false
   },
   "rewrites": [
+    { "source": "/health", "destination": "/health.json" },
     { "source": "/signup", "destination": "/index.html" },
     { "source": "/login", "destination": "/index.html" },
     { "source": "/forgot-password", "destination": "/index.html" },
     { "source": "/terms", "destination": "/index.html" },
-    { "source": "/privacy", "destination": "/index.html" },
-    { "source": "/health", "destination": "/health.json" }
+    { "source": "/privacy", "destination": "/index.html" }
   ]
 }
