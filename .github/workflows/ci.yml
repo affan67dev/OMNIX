@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 30
     env:
       ENVIRONMENT: test
-      JWT_SECRET: ci-only-jwt-secret-012345678901234567890123456789
+      OMNIX_JWT_SECRET: ci-only-jwt-secret-012345678901234567890123456789
       OTP_PEPPER: ci-only-otp-pepper-012345678901234567890123456789
       ADMIN_API_KEY: ci-only-admin-key-012345678901234567890123456789
       SUPABASE_URL: https://example.supabase.co
@@ -29,7 +29,7 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ci-only-service-role-key
       VITE_SUPABASE_URL: https://example.supabase.co
       VITE_SUPABASE_ANON_KEY: ci-only-anon-key
-      VITE_API_BASE_URL: http://127.0.0.1:8000
+      VITE_API_BASE_URL: https://api.example.invalid
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,8 +70,11 @@ jobs:
       - name: Backend startup and health validation
         run: npm run validate:backend
 
-      - name: Production environment contract validation
+      - name: Test environment contract validation
         run: npm run validate:env
+
+      - name: Frontend environment contract validation
+        run: npm run validate:web-env
 
       - name: Production frontend build
         run: npm run build
