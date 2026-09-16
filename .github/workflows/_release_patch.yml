@@ -41,3 +41,4 @@ jobs:
           git diff --cached --check
           git commit -m 'chore(release): apply targeted verification fixes'
           git push origin HEAD:omnix-final-clean-2026-09-16
+# trigger installed-workflow execution after creation
