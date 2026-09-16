@@ -101,3 +101,4 @@ jobs:
       - run: echo "CI gate passed for $GITHUB_SHA; deployment may proceed."
 
 # Release verification trigger: keep CI behavior unchanged.
+# Test-contract correction is now included in the release branch.
