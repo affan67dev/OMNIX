@@ -19,6 +19,14 @@ OMNIX is a React/Vite web client with a FastAPI backend and Supabase/Postgres da
 4. Run the web client with `npm run dev`.
 5. Run the backend with `python -m uvicorn main:app --reload --port 8000`.
 
+The browser requires these public variables:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY` (or `VITE_SUPABASE_PUBLISHABLE_KEY`)
+- `VITE_API_BASE_URL`
+
+Do not use `localhost` or `127.0.0.1` as `VITE_API_BASE_URL` in a deployed environment. The production browser must point at the real deployed FastAPI service.
+
 ## Validation
 
 ```bash
@@ -28,14 +36,17 @@ npm run typecheck
 npm test
 npm run validate:backend
 npm run validate:env
+npm run validate:web-env
 npm run build
 ```
 
-`validate:env` only enforces production secrets when `ENVIRONMENT=production`.
+`validate:env` enforces the exact server-side production variable names used by the backend. `validate:web-env` enforces the browser-side production contract and rejects localhost API URLs.
 
 ## Supabase
 
-The browser uses only `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Never expose `SUPABASE_SERVICE_ROLE_KEY` through a `VITE_*` variable.
+The browser uses only `VITE_SUPABASE_URL` plus the public anon/publishable key. Never expose `SUPABASE_SERVICE_ROLE_KEY` through a `VITE_*` variable.
+
+The existing browser Supabase adapter performs authentication and REST operations against the configured Supabase project. It does not contain a fake offline authentication implementation. If the public Supabase variables are absent from the Vercel **Production** environment, authentication cannot work and the deployment must be treated as misconfigured.
 
 Database changes live under `supabase/migrations/`. Review migrations for backward compatibility before applying them to production. This repository does not claim automatic database rollback.
 
@@ -53,12 +64,13 @@ Database changes live under `supabase/migrations/`. Review migrations for backwa
 
 1. checks out the exact CI-verified commit;
 2. pulls the Vercel production environment;
-3. builds a production artifact;
-4. creates a staged production deployment without changing live traffic;
-5. smoke-tests `/health`;
-6. promotes the verified deployment;
-7. checks production `/health`;
-8. uses Vercel's native rollback if the post-promotion health check fails.
+3. validates the browser-side production environment contract;
+4. builds a production artifact;
+5. creates a staged production deployment without changing live traffic;
+6. smoke-tests `/health`;
+7. promotes the verified deployment;
+8. checks production `/health`;
+9. uses Vercel's native rollback if the post-promotion health check fails.
 
 `vercel.json` disables automatic Git deployments so production traffic is controlled by the gated GitHub Actions workflow.
 
@@ -68,7 +80,7 @@ Required GitHub **production environment** secrets:
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
 
-The GitHub `production` environment should also have the desired reviewers/protection rules configured in repository settings.
+The Vercel **Production** environment must also contain the actual web variables listed above. Their values are intentionally never stored in Git.
 
 ## Health checks
 
