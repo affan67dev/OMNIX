@@ -1,4 +1,11 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+const rawApiBase = String(import.meta.env.VITE_API_BASE_URL || '').trim();
+
+// Production must be explicitly configured. Never silently fall back to localhost,
+// because a Vercel browser cannot reach a developer's local FastAPI process.
+export const API_BASE = rawApiBase.replace(/\/$/, '');
+export const apiConfigurationError = !API_BASE
+  ? 'Backend API is not configured for this deployment. Set VITE_API_BASE_URL in the Vercel environment.'
+  : null;
 
 // Compatibility namespace only; this is never sent to the server and is not a user identity.
 export const CURRENT_USER_ID = 'authenticated-session';
@@ -7,7 +14,14 @@ type RequestOptions = RequestInit & {
   query?: Record<string, string | number | boolean | undefined>;
 };
 
+function requireApiConfiguration(): void {
+  if (!API_BASE) {
+    throw new Error(apiConfigurationError || 'Backend API is not configured.');
+  }
+}
+
 export async function apiJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  requireApiConfiguration();
   const url = new URL(`${API_BASE}${path}`);
 
   Object.entries(options.query ?? {}).forEach(([key, value]) => {
@@ -20,8 +34,8 @@ export async function apiJson<T>(path: string, options: RequestOptions = {}): Pr
   let accessToken: string | null = null;
   try {
     accessToken = window.localStorage.getItem('access_token');
-  } catch (error) {
-    console.error('Unable to read access token', error);
+  } catch {
+    console.error('Unable to read access token');
   }
   if (accessToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${accessToken}`);
@@ -46,6 +60,7 @@ export async function apiJson<T>(path: string, options: RequestOptions = {}): Pr
 }
 
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  requireApiConfiguration();
   const url = new URL(`${API_BASE}${path}`);
   const form = new FormData();
   form.append('file', file);
@@ -53,8 +68,8 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   try {
     const accessToken = window.localStorage.getItem('access_token');
     if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
-  } catch (error) {
-    console.error('Unable to read access token', error);
+  } catch {
+    console.error('Unable to read access token');
   }
   const response = await fetch(url.toString(), { method: 'POST', headers, body: form });
   const payload = await response.json().catch(() => null);
@@ -64,5 +79,3 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   }
   return payload as T;
 }
-
-export { API_BASE };

@@ -5,7 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "python -m pytest -q",
+    "validate:backend": "python scripts/validate_backend.py",
+    "validate:env": "python scripts/validate_env.py",
+    "validate:web-env": "node scripts/validate_web_env.mjs",
     "build": "vite build",
+    "build:ci": "npm run lint && npm run typecheck && npm test && npm run validate:backend && npm run validate:web-env && npm run build",
     "preview": "vite preview"
   },
   "devDependencies": {
@@ -18,7 +25,6 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.0.0",
     "vite": "^6.4.3",
-    "vite-plugin-checker": "^0.14.4",
     "vite-tsconfig-paths": "^6.1.1"
   },
   "dependencies": {

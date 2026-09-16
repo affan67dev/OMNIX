@@ -1,75 +1,50 @@
-name: Android and Web CI
+name: Android CI
 
 on:
-  push:
-    branches: ["main"]
   pull_request:
-    branches: ["main"]
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint-test-build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      # Test-only deterministic secrets; production secrets stay in the deployment environment.
-      JWT_SECRET: ci-only-jwt-secret-012345678901234567890123456789
-      OTP_PEPPER: ci-only-otp-pepper-012345678901234567890123456789
-      ENVIRONMENT: test
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: TypeScript diagnostics
-        run: npx tsc --noEmit
-
-      - name: Lint
-        run: npm run lint --if-present
-
-      - name: Build web
-        run: npm run build --if-present
-
-      - name: Run Python tests
-        run: |
-          python -m pip install -r requirements.txt
-          python -m pip install pytest
-          pytest -q tests
-
-      - name: Upload web dist artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: web-dist
-          path: dist
-          if-no-files-found: ignore
-
   android-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    needs: lint-test-build
+    env:
+      ENVIRONMENT: test
+      JWT_SECRET: ci-only-jwt-secret-012345678901234567890123456789
+      OTP_PEPPER: ci-only-otp-pepper-012345678901234567890123456789
+      ADMIN_API_KEY: ci-only-admin-key-012345678901234567890123456789
+      SUPABASE_URL: https://example.supabase.co
+      SUPABASE_ANON_KEY: ci-only-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-only-service-role-key
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
+          cache: gradle
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+
+      - name: Install required Android SDK packages
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: Ensure local.properties points to Android SDK
         working-directory: android
@@ -77,11 +52,11 @@ jobs:
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew --no-daemon assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
+          name: app-debug-apk-${{ github.sha }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: ignore
+          if-no-files-found: error

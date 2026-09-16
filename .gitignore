@@ -15,22 +15,29 @@ android/.gradle/
 android/local.properties
 android/app/build/
 android/build/
+standalone-admin-suite/**/.gradle/
+standalone-admin-suite/**/build/
 *.keystore
 *.jks
+*.aab
+*.apk
 
 # Secrets & Credentials
 api-credentials.json
 api-credentials.jso
+google-services.json
+firebase-config.json
+key.properties
 *.key
 *.pem
-google-services.json
-key.properties
-firebase-config.json
 
-# Database
+# Databases and local runtime state
 *.db
 *.sqlite
 *.sqlite3
+*.sqlite-journal
+*.db-shm
+*.db-wal
 
 # IDE & OS
 .vscode/
@@ -45,3 +52,4 @@ Thumbs.db
 /dist/
 .next/
 out/
+.vercel/
