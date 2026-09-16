@@ -1,0 +1,43 @@
+name: Temporary release patch
+
+on:
+  push:
+    branches: [omnix-final-clean-2026-09-16]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message != 'chore(release): apply targeted verification fixes'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: omnix-final-clean-2026-09-16
+          fetch-depth: 1
+      - name: Apply only targeted fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          auth = Path('src/pages/AuthContainer.tsx')
+          text = auth.read_text()
+          old = text
+          text = text.replace(' setOfflineMode(false);', '')
+          if text == old:
+              raise SystemExit('AuthContainer targeted cleanup did not match expected code')
+          auth.write_text(text)
+          supabase = Path('src/supabase/supabaseClient.ts')
+          text = supabase.read_text()
+          text = text.replace('try { body = await response.json(); } catch {}', 'try { body = await response.json(); } catch { body = null; }')
+          text = text.replace('let filters: Array<[string, string]> = [];', 'const filters: Array<[string, string]> = [];')
+          supabase.write_text(text)
+          PY
+      - name: Commit and push targeted fixes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/AuthContainer.tsx src/supabase/supabaseClient.ts
+          git diff --cached --check
+          git commit -m 'chore(release): apply targeted verification fixes'
+          git push origin HEAD:omnix-final-clean-2026-09-16
