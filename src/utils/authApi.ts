@@ -18,7 +18,29 @@ function toAuthError(error: { message?: string; status?: number; code?: string }
 export function persistAuthSession(session: { access_token: string; refresh_token: string; expires_in: number; user: AuthUser }): void { window.localStorage.setItem('access_token', session.access_token); window.localStorage.setItem('refresh_token', session.refresh_token); window.localStorage.setItem('user', JSON.stringify(session.user)); }
 export async function getCurrentSession() { const { data, error } = await supabase.auth.getSession(); if (error) throw toAuthError(error); return data.session; }
 
-export async function loginWithPassword(identity: string, password: string): Promise<AuthSuccessResponse> { const value = identity.trim(); if (!value || !password) throw new Error('Email/phone and password are required.'); const credentials = value.includes('@') ? { email: value.toLowerCase(), password } : { phone: value, password }; const { data, error } = await supabase.auth.signInWithPassword(credentials); if (error || !data.session || !data.user) throw toAuthError(error); const username = String(data.user.user_metadata?.username || data.user.email?.split('@')[0] || data.user.phone || 'user'); const response = { success: true, access_token: data.session.access_token, refresh_token: data.session.refresh_token, expires_in: data.session.expires_in || 3600, user: { id: data.user.id, email: data.user.email, username, phone: data.user.phone } }; persistAuthSession(response); return response; }
+async function resolveIdentity(identity: string): Promise<{ email?: string; phone?: string }> {
+  const value = identity.trim();
+  if (value.includes('@')) return { email: value.toLowerCase() };
+  if (/^\+?\d[\d\s().-]{7,}$/.test(value)) return { phone: value };
+  const username = validateUsername(value);
+  const { data, error } = await supabase.from('profiles').select('user_id,username,mobile').eq('username', username).maybeSingle();
+  if (error) throw new Error('Unable to resolve username right now.');
+  if (!data?.mobile) throw new Error('Please log in with your email address or phone number.');
+  // The existing Supabase Auth account is identified by phone in this project.
+  return { phone: String(data.mobile) };
+}
+
+export async function loginWithPassword(identity: string, password: string): Promise<AuthSuccessResponse> {
+  const value = identity.trim();
+  if (!value || !password) throw new Error('Email/phone/username and password are required.');
+  const credentials = { ...(await resolveIdentity(value)), password };
+  const { data, error } = await supabase.auth.signInWithPassword(credentials);
+  if (error || !data.session || !data.user) throw toAuthError(error);
+  const username = String(data.user.user_metadata?.username || data.user.email?.split('@')[0] || data.user.phone || 'user');
+  const response = { success: true, access_token: data.session.access_token, refresh_token: data.session.refresh_token, expires_in: data.session.expires_in || 3600, user: { id: data.user.id, email: data.user.email, username, phone: data.user.phone } };
+  persistAuthSession(response);
+  return response;
+}
 
 export async function sendSignupOtp(countryCode: string, phoneNumber: string): Promise<{ phone: string; expiresIn: number; challenge_id: string; otp_code?: string }> { const phone = normalizePhone(countryCode, phoneNumber); const { error } = await supabase.auth.signInWithOtp({ phone, options: { shouldCreateUser: true } }); if (error) throw toAuthError(error); return { phone, expiresIn: 60, challenge_id: phone }; }
 export async function verifySignupOtp(phone: string, otpCode: string): Promise<AuthSuccessResponse> { if (!/^\d{6}$/.test(otpCode)) throw new Error('Enter the 6-digit OTP.'); const { data, error } = await supabase.auth.verifyOtp({ phone, token: otpCode, type: 'sms' }); if (error || !data.session || !data.user) throw toAuthError(error); return { success: true, access_token: data.session.access_token, refresh_token: data.session.refresh_token, expires_in: data.session.expires_in || 3600, user: { id: data.user.id, username: String(data.user.user_metadata?.username || data.user.phone || 'user'), phone: data.user.phone } }; }
