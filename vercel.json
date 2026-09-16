@@ -1,7 +1,12 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": false
+  },
   "rewrites": [
     { "source": "/signup", "destination": "/index.html" },
     { "source": "/login", "destination": "/index.html" },
-    { "source": "/forgot-password", "destination": "/index.html" }
+    { "source": "/forgot-password", "destination": "/index.html" },
+    { "source": "/health", "destination": "/health.json" }
   ]
 }
