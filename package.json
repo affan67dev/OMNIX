@@ -5,7 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "python -m pytest -q",
+    "validate:backend": "python scripts/validate_backend.py",
+    "validate:env": "python scripts/validate_env.py",
     "build": "vite build",
+    "build:ci": "npm run lint && npm run typecheck && npm test && npm run validate:backend && npm run build",
     "preview": "vite preview"
   },
   "devDependencies": {
