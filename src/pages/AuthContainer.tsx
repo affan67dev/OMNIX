@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { supabase } from '../supabase/supabaseClient';
 import { Stories } from '../components/ui/Stories';
 import { HomeFeed } from '../components/ui/HomeFeed';
 import { Reels } from '../components/ui/Reels';
@@ -16,6 +17,7 @@ import { checkSignupAvailability, loginWithPassword, persistAuthSession, sendSig
 
 export function AuthContainer() {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [authSession, setAuthSession] = useState<any>(null);
   const [screen, setScreen] = useState<'login' | 'signup' | 'dashboard'>('login');
   const [activeTab, setActiveTab] = useState<'home' | 'search' | 'post' | 'reels' | 'profile' | 'messages' | 'settings'>('home');
   const [targetConversationId, setTargetConversationId] = useState('');
@@ -101,20 +103,13 @@ export function AuthContainer() {
           console.error('Launch payload read failed', error);
         }
 
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        const session = sessionData.session;
+        setAuthSession(session);
         const backendReachable = await probeBackendReachable();
         setOfflineMode(!backendReachable);
-
-        if (!backendReachable) {
-          setScreen('login');
-          setAuthError('Offline Mode');
-        }
-
-        if (!storedToken) {
-          clearCorruptLocalState();
-          setScreen('login');
-        }
-
-        if (backendReachable && storedToken) {
+        if (session && storedToken) {
           try {
             const parsedUser = storedUser ? JSON.parse(storedUser) as { username?: string } : null;
             if (parsedUser?.username) {
@@ -140,14 +135,14 @@ export function AuthContainer() {
           console.error('App lock bootstrap read failed', error);
         }
 
-        if (backendReachable && launchPayload?.targetScreen === 'chat') {
+        if (session && launchPayload?.targetScreen === 'chat') {
           setScreen('dashboard');
           setActiveTab('messages');
           setTargetConversationId(launchPayload.conversationId ?? '');
-        } else if (backendReachable && launchPayload?.targetScreen === 'profile') {
+        } else if (session && launchPayload?.targetScreen === 'profile') {
           setScreen('dashboard');
           setActiveTab('profile');
-        } else if (backendReachable && launchPayload?.targetScreen === 'settings') {
+        } else if (session && launchPayload?.targetScreen === 'settings') {
           setScreen('dashboard');
           setActiveTab('settings');
         }
@@ -159,7 +154,7 @@ export function AuthContainer() {
           console.error('Push token read failed', error);
         }
 
-        if (backendReachable && pendingPushToken) {
+        if (session && backendReachable && pendingPushToken) {
           try {
             await apiJson('/api/v1/push/register-device', {
               method: 'POST',
@@ -185,15 +180,20 @@ export function AuthContainer() {
         console.error('Fatal bootstrap failure', error);
         clearCorruptLocalState();
         setScreen('login');
-        setOfflineMode(true);
-        setAuthError('Offline Mode');
+        setAuthSession(null);
+        setAuthError(error instanceof Error ? error.message : 'Authentication could not be restored. Please log in again.');
       } finally {
         window.setTimeout(() => setIsBootstrapping(false), 1000);
       }
     };
 
     void bootstrap();
+    const { data: authSubscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthSession(session);
+      if (!session) { setScreen('login'); setActiveTab('home'); }
+    });
     const unsubscribe = subscribeToOpenScreen((payload) => {
+      if (!authSession) { setScreen('login'); return; }
       setScreen('dashboard');
       if (payload.targetScreen === 'chat') {
         setActiveTab('messages');
@@ -206,7 +206,7 @@ export function AuthContainer() {
         setActiveTab('home');
       }
     });
-    return () => unsubscribe();
+    return () => { authSubscription.subscription.unsubscribe(); unsubscribe(); };
   }, []);
 
   useEffect(() => {
@@ -257,9 +257,11 @@ export function AuthContainer() {
   };
 
   const resetSession = () => {
+    void supabase.auth.signOut().catch(() => undefined);
     window.localStorage.removeItem('user');
     window.localStorage.removeItem('access_token');
     window.localStorage.removeItem('refresh_token');
+    setAuthSession(null);
     setScreen('login');
     setActiveTab('home');
     setTargetConversationId('');
@@ -295,6 +297,8 @@ export function AuthContainer() {
   if (isBootstrapping) {
     return <LaunchSplashScreen />;
   }
+
+  if (screen === 'dashboard' && !authSession) { setScreen('login'); return null; }
 
   if (screen === 'dashboard' && appLocked) {
     return (
