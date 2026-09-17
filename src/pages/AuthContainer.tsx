@@ -298,7 +298,7 @@ export function AuthContainer() {
     return <LaunchSplashScreen />;
   }
 
-  if (screen === 'dashboard' && !authSession) { setScreen('login'); return null; }
+  if (screen === 'dashboard' && !authSession) { return <LaunchSplashScreen />; }
 
   if (screen === 'dashboard' && appLocked) {
     return (
