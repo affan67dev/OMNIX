@@ -1,0 +1,22 @@
+from pathlib import Path
+p = Path('src/pages/AuthContainer.tsx')
+s = p.read_text()
+def must(old, new, count=1):
+    global s
+    n = s.count(old)
+    if n != count: raise SystemExit(f'expected {count}, found {n}: {old[:100]!r}')
+    s = s.replace(old, new, count)
+must("import React, { useEffect, useState } from 'react';", "import React, { useEffect, useState } from 'react';\nimport { supabase } from '../supabase/supabaseClient';")
+must("  const [isBootstrapping, setIsBootstrapping] = useState(true);", "  const [isBootstrapping, setIsBootstrapping] = useState(true);\n  const [authSession, setAuthSession] = useState<any>(null);")
+must("        const backendReachable = await probeBackendReachable();\n        setOfflineMode(!backendReachable);\n\n        if (!backendReachable) {\n          setScreen('login');\n          setAuthError('Offline Mode');\n        }\n\n        if (!storedToken) {\n          clearCorruptLocalState();\n          setScreen('login');\n        }\n\n        if (backendReachable && storedToken) {", "        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();\n        if (sessionError) throw sessionError;\n        const session = sessionData.session;\n        setAuthSession(session);\n\n        const backendReachable = await probeBackendReachable();\n        setOfflineMode(!backendReachable);\n\n        if (session && storedToken) {")
+must("        if (backendReachable && launchPayload?.targetScreen === 'chat') {", "        if (session && launchPayload?.targetScreen === 'chat') {")
+must("        } else if (backendReachable && launchPayload?.targetScreen === 'profile') {", "        } else if (session && launchPayload?.targetScreen === 'profile') {")
+must("        } else if (backendReachable && launchPayload?.targetScreen === 'settings') {", "        } else if (session && launchPayload?.targetScreen === 'settings') {")
+must("        if (backendReachable && pendingPushToken) {", "        if (session && backendReachable && pendingPushToken) {")
+must("        setScreen('login');\n        setOfflineMode(true);\n        setAuthError('Offline Mode');", "        setScreen('login');\n        setAuthSession(null);\n        setAuthError(error instanceof Error ? error.message : 'Authentication could not be restored. Please log in again.');")
+must("    void bootstrap();\n    const unsubscribe = subscribeToOpenScreen((payload) => {\n      setScreen('dashboard');", "    void bootstrap();\n    const { data: authSubscription } = supabase.auth.onAuthStateChange((_event, session) => {\n      setAuthSession(session);\n      if (!session) resetSession();\n    });\n    const unsubscribe = subscribeToOpenScreen((payload) => {\n      if (!authSession) return;\n      setScreen('dashboard');")
+must("    return () => unsubscribe();\n  }, []);", "    return () => {\n      authSubscription.subscription.unsubscribe();\n      unsubscribe();\n    };\n  }, [authSession]);")
+must("  const resetSession = () => {\n    window.localStorage.removeItem('user');", "  const resetSession = () => {\n    void supabase.auth.signOut().catch(() => undefined);\n    window.localStorage.removeItem('user');")
+must("    setScreen('login');\n    setActiveTab('home');", "    setAuthSession(null);\n    setScreen('login');\n    setActiveTab('home');")
+must("  if (screen === 'dashboard' && appLocked) {", "  if (screen === 'dashboard' && !authSession) return null;\n\n  if (screen === 'dashboard' && appLocked) {")
+p.write_text(s)
