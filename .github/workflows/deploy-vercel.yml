@@ -1,0 +1,100 @@
+name: Production Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: production
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_CLI_VERSION: 59.17.0
+    steps:
+      - name: Checkout the exact CI-verified commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Verify required Vercel configuration exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$VERCEL_TOKEN"
+          test -n "$VERCEL_ORG_ID"
+          test -n "$VERCEL_PROJECT_ID"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pull production Vercel environment
+        run: npx --yes vercel@${VERCEL_CLI_VERSION} pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build the Vercel production artifact
+        run: npx --yes vercel@${VERCEL_CLI_VERSION} build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy staged production version without changing live traffic
+        id: staged
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="$(npx --yes vercel@${VERCEL_CLI_VERSION} deploy --prebuilt --prod --skip-domain --token="$VERCEL_TOKEN" | tail -n 1)"
+          test -n "$url"
+          echo "deployment_url=$url" >> "$GITHUB_OUTPUT"
+          echo "Staged deployment created for commit $GITHUB_SHA"
+
+      - name: Smoke test staged deployment
+        env:
+          DEPLOYMENT_URL: ${{ steps.staged.outputs.deployment_url }}
+        run: |
+          set -euo pipefail
+          npx --yes vercel@${VERCEL_CLI_VERSION} curl /health --deployment "$DEPLOYMENT_URL" --token="$VERCEL_TOKEN"
+
+      - name: Promote verified deployment to production
+        env:
+          DEPLOYMENT_URL: ${{ steps.staged.outputs.deployment_url }}
+        run: npx --yes vercel@${VERCEL_CLI_VERSION} promote "$DEPLOYMENT_URL" --yes --token="$VERCEL_TOKEN"
+
+      - name: Verify production after promotion
+        id: production_health
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes vercel@${VERCEL_CLI_VERSION} curl /health --token="$VERCEL_TOKEN"
+
+      - name: Roll back after a failed production health check
+        if: ${{ failure() && steps.production_health.outcome == 'failure' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes vercel@${VERCEL_CLI_VERSION} rollback --token="$VERCEL_TOKEN"
+          npx --yes vercel@${VERCEL_CLI_VERSION} rollback status --token="$VERCEL_TOKEN"
+          exit 1
+
+      - name: Record deployment provenance
+        if: success()
+        run: |
+          echo "Production deployment verified for commit: $GITHUB_SHA"
+          echo "GitHub Actions run: $GITHUB_RUN_ID"

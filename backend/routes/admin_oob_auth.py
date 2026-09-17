@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from backend.services.admin_oob_auth import admin_oob_auth_service
 from backend.services.push_notifications import PushNotificationError, push_notification_service
+from backend.services.supabase_db import select_many, select_one, upsert_one
 
 router = APIRouter(prefix="", tags=["admin"])
 
@@ -89,11 +90,24 @@ def secrets_compare(left: str, right: str) -> bool:
 
 @router.get("/api/admin/metrics")
 async def admin_metrics(x_admin_key: Optional[str] = Header(default=None)):
-    # CI gets a deterministic contract response; production requires the dedicated admin key.
-    if os.getenv("ENVIRONMENT", "production").lower() != "test": _admin_key(x_admin_key)
-    return {"success": True, "metrics": {"online_users": 0, "ad_revenue": 0, "region_distribution": {}, "flagged_reports": 0}}
+    _admin_key(x_admin_key)
+    try:
+        profiles = await select_many("profiles", columns="user_id")
+        reports = await select_many("content_reports", columns="id")
+        posts = await select_many("posts", columns="id")
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail="Admin metrics dependency unavailable") from error
+    return {"success": True, "metrics": {"registered_users": len(profiles), "posts": len(posts), "flagged_reports": len(reports), "online_users": None, "ad_revenue": None, "notes": "Online presence and ad revenue are not persisted by the current schema."}}
 
 @router.post("/api/admin/posts/{post_id}/approve")
 async def approve_post(post_id: str, x_admin_key: Optional[str] = Header(default=None)):
     _admin_key(x_admin_key)
-    return {"success": True, "post_id": post_id, "status": "approved"}
+    try:
+        post = await select_one("posts", filters={"id": post_id}, columns="id")
+        if post is None: raise HTTPException(status_code=404, detail="Post not found")
+        moderation = await upsert_one("post_moderation", {"post_id": post_id, "status": "approved", "approved_by": "admin-api"}, "post_id")
+    except HTTPException:
+        raise
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail="Post moderation dependency unavailable") from error
+    return {"success": True, "post_id": post_id, "status": moderation.get("status", "approved")}
