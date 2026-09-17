@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Frontend + backend validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ENVIRONMENT: test
+      JWT_SECRET: ci-only-jwt-secret-012345678901234567890123456789
+      OTP_PEPPER: ci-only-otp-pepper-012345678901234567890123456789
+      SUPABASE_URL: https://example.supabase.co
+      SUPABASE_ANON_KEY: ci-only-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-only-service-role-key
+      VITE_SUPABASE_URL: https://example.supabase.co
+      VITE_SUPABASE_ANON_KEY: ci-only-anon-key
+      VITE_API_BASE_URL: http://127.0.0.1:8000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt pytest
+
+      - name: TypeScript diagnostics
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        run: npx eslint .
+
+      - name: Python syntax validation
+        run: python -m compileall -q main.py backend scripts
+
+      - name: Backend tests
+        run: python -m pytest -q tests
+
+      - name: Production frontend build
+        run: npm run build
+
+      - name: Verify no tracked credential/database artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -E '(^|/)(\.env$|.*\.db$|.*\.sqlite3?$|.*\.jks$|.*\.keystore$|google-services\.json$|api-credentials\.json$)'; then
+            echo 'Tracked credential/database artifact detected.'
+            exit 1
+          fi
