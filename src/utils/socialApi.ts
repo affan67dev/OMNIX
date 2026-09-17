@@ -1,4 +1,16 @@
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || '').trim();
+const API_BASE = (configuredApiBase || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '');
+
+export function getConfiguredApiBase(): string {
+  if (!API_BASE) {
+    throw new Error('OMNIX API is not configured. Set VITE_API_BASE_URL for this deployment.');
+  }
+  return API_BASE;
+}
+
+export function getApiBase(): string {
+  return getConfiguredApiBase();
+}
 
 // Compatibility namespace only; this is never sent to the server and is not a user identity.
 export const CURRENT_USER_ID = 'authenticated-session';
@@ -8,7 +20,7 @@ type RequestOptions = RequestInit & {
 };
 
 export async function apiJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const url = new URL(`${API_BASE}${path}`);
+  const url = new URL(`${getConfiguredApiBase()}${path}`);
 
   Object.entries(options.query ?? {}).forEach(([key, value]) => {
     if (value !== undefined && value !== '') {
@@ -46,7 +58,7 @@ export async function apiJson<T>(path: string, options: RequestOptions = {}): Pr
 }
 
 export async function apiUpload<T>(path: string, file: File): Promise<T> {
-  const url = new URL(`${API_BASE}${path}`);
+  const url = new URL(`${getConfiguredApiBase()}${path}`);
   const form = new FormData();
   form.append('file', file);
   const headers = new Headers();
