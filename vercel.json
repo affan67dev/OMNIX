@@ -3,6 +3,7 @@
     { "source": "/signup", "destination": "/index.html" },
     { "source": "/login", "destination": "/index.html" },
     { "source": "/forgot-password", "destination": "/index.html" },
-    { "source": "/health", "destination": "/health.json" }
+    { "source": "/health", "destination": "/health.json" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
