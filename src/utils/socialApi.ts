@@ -1,3 +1,5 @@
+import { supabase } from '../supabase/supabaseClient';
+
 const configuredApiBase = String(import.meta.env.VITE_API_BASE_URL || '').trim();
 const API_BASE = (configuredApiBase || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '');
 
@@ -31,9 +33,9 @@ export async function apiJson<T>(path: string, options: RequestOptions = {}): Pr
   const headers = new Headers(options.headers ?? {});
   let accessToken: string | null = null;
   try {
-    accessToken = window.localStorage.getItem('access_token');
+    accessToken = (await supabase.auth.getSession()).data.session?.access_token ?? null;
   } catch (error) {
-    console.error('Unable to read access token', error);
+    console.error('Unable to resolve current Supabase session', error);
   }
   if (accessToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${accessToken}`);
@@ -63,10 +65,10 @@ export async function apiUpload<T>(path: string, file: File): Promise<T> {
   form.append('file', file);
   const headers = new Headers();
   try {
-    const accessToken = window.localStorage.getItem('access_token');
+    const accessToken = (await supabase.auth.getSession()).data.session?.access_token ?? null;
     if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
   } catch (error) {
-    console.error('Unable to read access token', error);
+    console.error('Unable to resolve current Supabase session', error);
   }
   const response = await fetch(url.toString(), { method: 'POST', headers, body: form });
   const payload = await response.json().catch(() => null);
