@@ -3,6 +3,14 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default [
+  {
+    ignores: [
+      "android/app/src/main/assets/www/assets/**",
+      "dist/**",
+      "node_modules/**",
+      "static/**"
+    ]
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
