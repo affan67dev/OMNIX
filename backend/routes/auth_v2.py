@@ -19,7 +19,6 @@ from backend.services.supabase_db import insert_one, select_one, update_one, ups
 router = APIRouter(prefix="/api/v2/auth", tags=["Authentication v2"])
 limiter = Limiter(key_func=get_remote_address)
 OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "5"))
-ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
 RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
 
 
@@ -131,6 +130,7 @@ async def _ensure_supabase_user(phone: str, username: str | None = None) -> tupl
 @limiter.limit("3/minute")
 async def request_phone_otp(request: Request, payload: PhoneRequest):
     phone = f"{payload.country_code}{payload.phone_number}"
+    phone_query = phone.replace("+", "%2B")
     # Only the newest challenge can be used. The OTP itself is never stored in plaintext.
     existing = await _find_profile_by_phone(phone)
     if payload.purpose == "signup" and existing:
@@ -138,7 +138,7 @@ async def request_phone_otp(request: Request, payload: PhoneRequest):
     if payload.purpose == "login" and not existing:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    latest_rows = await _db_request("GET", "phone_otp_challenges", query=f"?select=id,created_at,consumed_at&phone_e164=eq.{phone}&purpose=eq.{payload.purpose}&order=created_at.desc&limit=1")
+    latest_rows = await _db_request("GET", "phone_otp_challenges", query=f"?select=id,created_at,consumed_at&phone_e164=eq.{phone_query}&purpose=eq.{payload.purpose}&order=created_at.desc&limit=1")
     if latest_rows and not latest_rows[0].get("consumed_at"):
         created_at = datetime.fromisoformat(str(latest_rows[0]["created_at"]).replace("Z", "+00:00"))
         if (datetime.now(timezone.utc) - created_at).total_seconds() < RESEND_COOLDOWN_SECONDS:
