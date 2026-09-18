@@ -85,12 +85,10 @@ export function AuthContainer() {
     const bootstrap = async () => {
       try {
         let storedUser: string | null = null;
-        let storedToken: string | null = null;
         let launchPayload: ReturnType<typeof consumeNativeLaunchPayload> = null;
 
         try {
           storedUser = window.localStorage.getItem('user');
-          storedToken = window.localStorage.getItem('access_token');
         } catch (error) {
           console.error('Bootstrap local storage read failed', error);
           clearCorruptLocalState();
