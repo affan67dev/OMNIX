@@ -33,7 +33,7 @@ export function AuthContainer() {
   const [currentUsername, setCurrentUsername] = useState('omnix_user');
 
   const [signupStep, setSignupStep] = useState<1 | 2 | 3>(1);
-  const [countryCode, setCountryCode] = useState('+1');
+  const [countryCode, setCountryCode] = useState('+91');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [otpChallengeId, setOtpChallengeId] = useState('');
   const [otpCode, setOtpCode] = useState('');
