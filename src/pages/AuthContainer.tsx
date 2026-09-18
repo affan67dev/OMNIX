@@ -109,19 +109,18 @@ export function AuthContainer() {
         setAuthSession(session);
         const backendReachable = await probeBackendReachable();
         setOfflineMode(!backendReachable);
-        if (session && storedToken) {
+        if (session) {
           try {
             const parsedUser = storedUser ? JSON.parse(storedUser) as { username?: string } : null;
-            if (parsedUser?.username) {
-              setCurrentUsername(parsedUser.username);
-              setIdentifier(parsedUser.username);
-            }
+            const sessionUsername = String(session.user?.user_metadata?.username || session.user?.email?.split('@')[0] || session.user?.phone || '').trim();
+            const resolvedUsername = String(parsedUser?.username || sessionUsername || 'omnix_user').trim() || 'omnix_user';
+            setCurrentUsername(resolvedUsername);
+            setIdentifier(resolvedUsername);
           } catch (error) {
-            console.error('Corrupt user payload in local storage', error);
-            clearCorruptLocalState();
-            setScreen('login');
-            setAuthError('Session data was invalid. Please login again.');
-            return;
+            console.error('Stored profile hint is invalid; continuing with authoritative Supabase session', error);
+            const sessionUsername = String(session.user?.user_metadata?.username || session.user?.email?.split('@')[0] || session.user?.phone || 'omnix_user').trim() || 'omnix_user';
+            setCurrentUsername(sessionUsername);
+            setIdentifier(sessionUsername);
           }
 
           setScreen('dashboard');
