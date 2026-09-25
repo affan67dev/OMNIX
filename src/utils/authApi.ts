@@ -1,5 +1,16 @@
 import { supabase } from '../supabase/supabaseClient';
 
+const API_BASE = (String(import.meta.env.VITE_API_BASE_URL || '').trim() || (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '');
+
+async function authBackend(path: string, body: Record<string, unknown>): Promise<any> {
+  if (!API_BASE) throw new Error('Authentication backend is not configured.');
+  const response = await fetch(`${API_BASE}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let data: any = null;
+  try { data = await response.json(); } catch {}
+  if (!response.ok) throw toAuthError({ message: data?.detail || data?.message, status: response.status });
+  return data;
+}
+
 export type AuthUser = { id: string; email?: string; username?: string; phone?: string };
 export type AuthSuccessResponse = { success: boolean; access_token: string; refresh_token: string; expires_in: number; user: AuthUser };
 
@@ -20,8 +31,24 @@ export async function getCurrentSession() { const { data, error } = await supaba
 
 export async function loginWithPassword(identity: string, password: string): Promise<AuthSuccessResponse> { const value = identity.trim(); if (!value || !password) throw new Error('Email/phone and password are required.'); const credentials = value.includes('@') ? { email: value.toLowerCase(), password } : { phone: value, password }; const { data, error } = await supabase.auth.signInWithPassword(credentials); if (error || !data.session || !data.user) throw toAuthError(error); const username = String(data.user.user_metadata?.username || data.user.email?.split('@')[0] || data.user.phone || 'user'); const response = { success: true, access_token: data.session.access_token, refresh_token: data.session.refresh_token, expires_in: data.session.expires_in || 3600, user: { id: data.user.id, email: data.user.email, username, phone: data.user.phone } }; persistAuthSession(response); return response; }
 
-export async function sendSignupOtp(countryCode: string, phoneNumber: string): Promise<{ phone: string; expiresIn: number; challenge_id: string; otp_code?: string }> { const phone = normalizePhone(countryCode, phoneNumber); const { error } = await supabase.auth.signInWithOtp({ phone, options: { shouldCreateUser: true } }); if (error) throw toAuthError(error); return { phone, expiresIn: 60, challenge_id: phone }; }
-export async function verifySignupOtp(phone: string, otpCode: string): Promise<AuthSuccessResponse> { if (!/^\d{6}$/.test(otpCode)) throw new Error('Enter the 6-digit OTP.'); const { data, error } = await supabase.auth.verifyOtp({ phone, token: otpCode, type: 'sms' }); if (error || !data.session || !data.user) throw toAuthError(error); return { success: true, access_token: data.session.access_token, refresh_token: data.session.refresh_token, expires_in: data.session.expires_in || 3600, user: { id: data.user.id, username: String(data.user.user_metadata?.username || data.user.phone || 'user'), phone: data.user.phone } }; }
+export async function sendSignupOtp(countryCode: string, phoneNumber: string): Promise<{ phone: string; expiresIn: number; challenge_id: string }> {
+  const phone = normalizePhone(countryCode, phoneNumber);
+  const country = phone.startsWith('+91') ? '+91' : countryCode.trim().replace(/[^\d+]/g, '');
+  const localNumber = phone.slice(country.length);
+  const result = await authBackend('/api/v2/auth/phone/request', { country_code: country, phone_number: localNumber, purpose: 'signup' });
+  return { phone, expiresIn: Number(result.expires_in || 300), challenge_id: String(result.challenge_id) };
+}
+export async function verifySignupOtp(challengeId: string, otpCode: string): Promise<AuthSuccessResponse> {
+  if (!/^\d{6}$/.test(otpCode)) throw new Error('Enter the 6-digit OTP.');
+  const result = await authBackend('/api/v2/auth/phone/verify', { challenge_id: challengeId, otp_code: otpCode, purpose: 'signup' });
+  if (!result?.access_token || !result?.refresh_token) throw new Error('Authentication session could not be established.');
+  const user = result.user || {};
+  const session = { access_token: result.access_token, refresh_token: result.refresh_token, expires_in: Number(result.expires_in || 3600), user };
+  await supabase.auth.setSession(session);
+  const response = { success: true, access_token: session.access_token, refresh_token: session.refresh_token, expires_in: session.expires_in, user: { id: String(user.id), email: user.email, username: String(user.user_metadata?.username || user.phone || 'user'), phone: user.phone } };
+  persistAuthSession(response);
+  return response;
+}
 
 export async function checkSignupAvailability(_email: string, username: string): Promise<{ email_available: boolean; username_available: boolean }> { const normalizedUsername = validateUsername(username); const { data, error } = await supabase.from('profiles').select('user_id,username').eq('username', normalizedUsername).maybeSingle(); if (error) throw new Error('Unable to validate username right now.'); return { username_available: !data, email_available: true }; }
 

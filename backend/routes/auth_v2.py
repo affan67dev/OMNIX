@@ -13,13 +13,27 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from backend.core.security import create_access_token, generate_otp, hash_otp, verify_otp_hash
+from backend.services.fast2sms_service import send_otp as send_fast2sms_otp
 from backend.services.supabase_db import insert_one, select_one, update_one, upsert_one
 
 router = APIRouter(prefix="/api/v2/auth", tags=["Authentication v2"])
 limiter = Limiter(key_func=get_remote_address)
 OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "5"))
-ENVIRONMENT = os.getenv("ENVIRONMENT", "production").lower()
-SMS_WEBHOOK_URL = os.getenv("SMS_WEBHOOK_URL", "")
+RESEND_COOLDOWN_SECONDS = int(os.getenv("OTP_RESEND_COOLDOWN_SECONDS", "60"))
+
+
+async def _db_request(method: str, table: str, payload: dict | None = None, query: str = "") -> list[dict]:
+    base = os.getenv("SUPABASE_URL", "").rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not base or not key:
+        raise HTTPException(status_code=503, detail="Supabase authentication is not configured")
+    headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Prefer": "return=representation"}
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.request(method, f"{base}/rest/v1/{table}{query}", headers=headers, json=payload)
+    if response.status_code >= 400:
+        raise HTTPException(status_code=503, detail="Authentication store unavailable")
+    body = response.json() if response.content else []
+    return body if isinstance(body, list) else [body]
 
 
 class PhoneRequest(BaseModel):
@@ -61,27 +75,22 @@ class OTPVerifyRequest(BaseModel):
 
 
 async def _send_otp(phone: str, otp: str, challenge_id: str) -> str:
-    if not SMS_WEBHOOK_URL:
-        if ENVIRONMENT != "production":
-            return "development"
-        raise HTTPException(status_code=503, detail="SMS delivery is not configured")
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(SMS_WEBHOOK_URL, json={"to": phone, "otp": otp, "challenge_id": challenge_id})
-        if response.status_code >= 400:
-            raise HTTPException(status_code=502, detail="OTP delivery failed")
-        return "sent"
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="OTP delivery failed") from exc
+        result = await send_fast2sms_otp(phone, otp, challenge_id=challenge_id)
+        return "sent" if result.success else "failed"
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid phone number") from exc
+    except RuntimeError as exc:
+        if "configured" in str(exc).lower():
+            raise HTTPException(status_code=503, detail="SMS delivery is not configured") from exc
+        raise HTTPException(status_code=502, detail="Unable to send OTP. Please try again later.") from exc
 
 
 async def _find_profile_by_phone(phone: str) -> dict | None:
     return await select_one("profiles", filters={"mobile": phone}, columns="id,user_id,username,mobile")
 
 
-async def _ensure_supabase_user(phone: str, username: str) -> dict:
+async def _ensure_supabase_user(phone: str, username: str | None = None) -> tuple[dict, str]:
     existing = await _find_profile_by_phone(phone)
     if existing:
         return existing
@@ -92,11 +101,12 @@ async def _ensure_supabase_user(phone: str, username: str) -> dict:
         raise HTTPException(status_code=503, detail="Supabase authentication is not configured")
 
     password = uuid4().hex + uuid4().hex
+    safe_username = username or f"pending_{uuid4().hex[:12]}"
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.post(
             f"{supabase_url}/auth/v1/admin/users",
             headers={"apikey": service_key, "Authorization": f"Bearer {service_key}", "Content-Type": "application/json"},
-            json={"phone": phone, "phone_confirm": True, "password": password, "user_metadata": {"username": username, "mobile": phone}},
+            json={"phone": phone, "phone_confirm": True, "password": password, "user_metadata": {"username": safe_username, "mobile": phone}},
         )
     if response.status_code >= 400:
         detail = response.text
@@ -110,16 +120,17 @@ async def _ensure_supabase_user(phone: str, username: str) -> dict:
     user_id = auth_user["id"]
     profile = await upsert_one(
         "profiles",
-        {"user_id": user_id, "username": username, "mobile": phone},
+        {"user_id": user_id, "username": safe_username, "mobile": phone},
         "user_id",
     )
-    return profile
+    return profile, password
 
 
 @router.post("/phone/request", status_code=status.HTTP_202_ACCEPTED)
 @limiter.limit("3/minute")
 async def request_phone_otp(request: Request, payload: PhoneRequest):
     phone = f"{payload.country_code}{payload.phone_number}"
+    phone_query = phone.replace("+", "%2B")
     # Only the newest challenge can be used. The OTP itself is never stored in plaintext.
     existing = await _find_profile_by_phone(phone)
     if payload.purpose == "signup" and existing:
@@ -127,26 +138,28 @@ async def request_phone_otp(request: Request, payload: PhoneRequest):
     if payload.purpose == "login" and not existing:
         raise HTTPException(status_code=404, detail="Account not found")
 
+    latest_rows = await _db_request("GET", "phone_otp_challenges", query=f"?select=id,created_at,consumed_at&phone_e164=eq.{phone_query}&purpose=eq.{payload.purpose}&order=created_at.desc&limit=1")
+    if latest_rows and not latest_rows[0].get("consumed_at"):
+        created_at = datetime.fromisoformat(str(latest_rows[0]["created_at"]).replace("Z", "+00:00"))
+        if (datetime.now(timezone.utc) - created_at).total_seconds() < RESEND_COOLDOWN_SECONDS:
+            raise HTTPException(status_code=429, detail="Please wait before requesting another OTP")
+
+    await _db_request("PATCH", "phone_otp_challenges", {"consumed_at": datetime.now(timezone.utc).isoformat()}, f"?phone_e164=eq.{phone}&purpose=eq.{payload.purpose}&consumed_at=is.null")
+
     challenge_id = str(uuid4())
     otp = generate_otp()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)
-    await insert_one(
-        "phone_otp_challenges",
-        {
-            "id": challenge_id,
-            "phone_e164": phone,
-            "otp_hash": hash_otp(challenge_id, otp),
-            "purpose": payload.purpose,
-            "expires_at": expires_at.isoformat(),
-            "requested_ip": request.client.host if request.client else None,
-            "user_id": existing.get("user_id") if existing else None,
-        },
-    )
+    await insert_one("phone_otp_challenges", {
+        "id": challenge_id,
+        "phone_e164": phone,
+        "otp_hash": hash_otp(challenge_id, otp),
+        "purpose": payload.purpose,
+        "expires_at": expires_at.isoformat(),
+        "requested_ip": request.client.host if request.client else None,
+        "user_id": existing.get("user_id") if existing else None,
+    })
     delivery = await _send_otp(phone, otp, challenge_id)
-    response = {"success": True, "challenge_id": challenge_id, "expires_in": OTP_TTL_MINUTES * 60, "delivery": delivery}
-    if ENVIRONMENT != "production":
-        response["development_otp"] = otp
-    return response
+    return {"success": True, "challenge_id": challenge_id, "expires_in": OTP_TTL_MINUTES * 60, "delivery": delivery}
 
 
 @router.post("/phone/verify")
@@ -174,19 +187,30 @@ async def verify_phone_otp(request: Request, payload: OTPVerifyRequest):
     phone = challenge["phone_e164"]
     profile = await _find_profile_by_phone(phone)
     if profile is None:
-        if not payload.username:
-            raise HTTPException(status_code=409, detail="Username is required for a new account")
-        profile = await _ensure_supabase_user(phone, payload.username)
-    elif payload.username and payload.username != profile.get("username"):
+        if challenge.get("purpose") != "signup":
+            raise HTTPException(status_code=404, detail="Account not found")
+        profile, temporary_password = await _ensure_supabase_user(phone, payload.username)
+        supabase_url = os.getenv("SUPABASE_URL", "").rstrip("/")
+        service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+        async with httpx.AsyncClient(timeout=15) as client:
+            session_response = await client.post(
+                f"{supabase_url}/auth/v1/token?grant_type=password",
+                headers={"apikey": service_key, "Authorization": f"Bearer {service_key}", "Content-Type": "application/json"},
+                json={"phone": phone, "password": temporary_password},
+            )
+        if session_response.status_code >= 400:
+            raise HTTPException(status_code=502, detail="Authentication session could not be established")
+        session = session_response.json()
+        await update_one("phone_otp_challenges", filters={"id": payload.challenge_id}, payload={"consumed_at": datetime.now(timezone.utc).isoformat(), "user_id": profile["user_id"]})
+        return {"success": True, "access_token": session.get("access_token", ""), "refresh_token": session.get("refresh_token", ""), "expires_in": session.get("expires_in", 3600), "user": session.get("user")}
+
+    if payload.username and payload.username != profile.get("username"):
         raise HTTPException(status_code=409, detail="Account already exists; username cannot be changed during login")
 
     await update_one("phone_otp_challenges", filters={"id": payload.challenge_id}, payload={"consumed_at": datetime.now(timezone.utc).isoformat(), "user_id": profile["user_id"]})
 
     token, jti, expires_at = create_access_token(str(profile["user_id"]), phone, profile["username"])
-    await insert_one(
-        "auth_sessions",
-        {"user_id": profile["user_id"], "token_jti": jti, "expires_at": expires_at.isoformat(), "ip_address": request.client.host if request.client else None, "user_agent": request.headers.get("user-agent")},
-    )
+    await insert_one("auth_sessions", {"user_id": profile["user_id"], "token_jti": jti, "expires_at": expires_at.isoformat(), "ip_address": request.client.host if request.client else None, "user_agent": request.headers.get("user-agent")})
     return {"success": True, "access_token": token, "token_type": "bearer", "expires_at": expires_at.isoformat(), "user": {"id": profile["user_id"], "username": profile["username"], "phone": phone}}
 
 
