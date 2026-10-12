@@ -454,11 +454,7 @@ export function AuthContainer() {
     try {
       const response = await sendSignupOtp(countryCode, phoneNumber);
       setOtpChallengeId(response.challenge_id);
-      if (response.otp_code) {
-        setAvailabilityStatus(`Dev OTP: ${response.otp_code}`);
-      } else {
-        setAvailabilityStatus('OTP has been sent. Enter the 6-digit code.');
-      }
+      setAvailabilityStatus('OTP request accepted. Enter the 6-digit code sent to your phone.');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'OTP request failed');
     } finally {
