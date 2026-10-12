@@ -6,7 +6,7 @@ async function authBackend(path: string, body: Record<string, unknown>): Promise
   if (!API_BASE) throw new Error('Authentication backend is not configured.');
   const response = await fetch(`${API_BASE}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   let data: any = null;
-  try { data = await response.json(); } catch {}
+  try { data = await response.json(); } catch { /* Empty or non-JSON error body. */ }
   if (!response.ok) throw toAuthError({ message: data?.detail || data?.message, status: response.status });
   return data;
 }
