@@ -70,6 +70,9 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The legacy `tools` package was removed from the Android SDK repository.
+          packages: platform-tools
 
       - name: Ensure local.properties points to Android SDK
         working-directory: android
