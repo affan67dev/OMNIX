@@ -1,4 +1,4 @@
-# Independent OMNIX deployment. No ALEX/NEXO service or database is referenced.
+# Independent OMNIX deployment. This blueprint references no ALEX/NEXO resources.
 services:
   - type: web
     name: omnix-social-api
