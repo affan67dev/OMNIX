@@ -1,0 +1,53 @@
+# Independent OMNIX deployment. No ALEX/NEXO service or database is referenced.
+services:
+  - type: web
+    name: omnix-social-api
+    runtime: python
+    region: singapore
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: ENABLE_DOCS
+        value: "false"
+      - key: FRONTEND_URL
+        value: https://omnix-social-web.onrender.com
+      - key: JWT_SECRET
+        sync: false
+      - key: OTP_PEPPER
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_TTL_MINUTES
+        value: "60"
+      - key: OTP_TTL_MINUTES
+        value: "5"
+      - key: EXPOSE_DEV_OTP
+        value: "false"
+      - key: GLOBAL_RATE_LIMIT
+        value: 120/minute
+  - type: web
+    name: omnix-social-web
+    runtime: static
+    branch: main
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    autoDeploy: true
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://omnix-social-api.onrender.com
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_PUBLISHABLE_KEY
+        sync: false
