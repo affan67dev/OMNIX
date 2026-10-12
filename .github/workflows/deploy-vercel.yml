@@ -1,9 +1,14 @@
 name: Production Deploy
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  # Render is the production host. Legacy Vercel deployment is manual-only.
+  workflow_dispatch:
+    inputs:
+      enable_legacy_vercel_deploy:
+        description: "Explicitly enable the retired Vercel deployment path"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -14,9 +19,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'main'
+    if: ${{ inputs.enable_legacy_vercel_deploy == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     environment: production
@@ -29,7 +32,7 @@ jobs:
       - name: Checkout exact CI-verified commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
           fetch-depth: 1
 
       - name: Setup Node
