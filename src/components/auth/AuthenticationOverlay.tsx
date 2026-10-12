@@ -10,6 +10,17 @@ const primary: React.CSSProperties = { width:'100%', minHeight:52, border:0, bor
 const secondary: React.CSSProperties = { width:'100%', minHeight:50, borderRadius:13, border:'1px solid rgba(255,255,255,.11)', background:'#11161e', color:'#f5f7fa', fontWeight:700, fontSize:14, cursor:'pointer' };
 const linkStyle: React.CSSProperties = { color:'#d7dde7', border:0, background:'transparent', padding:0, cursor:'pointer', textDecoration:'underline', textUnderlineOffset:3 };
 const friendly = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+function storeSession(session: { access_token: string; refresh_token: string; user: any }, username: string) {
+  const cleanUsername = String(username || session.user?.user_metadata?.username || session.user?.email?.split('@')[0] || session.user?.phone || '').trim();
+  window.localStorage.setItem('access_token', session.access_token);
+  window.localStorage.setItem('refresh_token', session.refresh_token);
+  window.localStorage.setItem('user', JSON.stringify({
+    id: session.user?.id,
+    username: cleanUsername,
+    email: session.user?.email,
+    phone: session.user?.phone,
+  }));
+}
 
 
 export function AuthenticationOverlay() {
