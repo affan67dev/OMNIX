@@ -21,6 +21,7 @@ from slowapi.errors import RateLimitExceeded
 from typing import Optional, Dict, List, Any
 import re
 from datetime import datetime, timezone, timedelta
+from urllib.parse import urlencode
 from backend.services.social_graph import SocialGraphError, social_graph
 from backend.routes.settings_management import router as settings_management_router
 from backend.routes.billing import router as billing_router
@@ -195,7 +196,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:80",
         "http://localhost",
-        os.getenv("FRONTEND_URL", "")
+        os.getenv("FRONTEND_URL", "https://omnix-social-web.onrender.com").rstrip("/")
     ],
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -1434,15 +1435,15 @@ async def api_logout(request: Request):
     return {"success": True, "message": "Logged out successfully"}
 
 
-# Google OAuth placeholder (ready for implementation)
+# Legacy login-page entry point. The provider callback is handled by Supabase Auth;
+# the user's browser returns to the OMNIX frontend root where the session is exchanged.
 @app.get("/api/auth/google")
 async def google_oauth_redirect():
-    """Initiate Google OAuth flow."""
-    if not SUPABASE_URL:
-        raise HTTPException(status_code=500, detail="OAuth not configured")
-
-    redirect_url = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={os.getenv('FRONTEND_URL', 'http://localhost')}/auth/callback"
-    return {"redirect_url": redirect_url}
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise HTTPException(status_code=503, detail="OMNIX Google sign-in is not configured")
+    frontend_url = os.getenv("FRONTEND_URL", "https://omnix-social-web.onrender.com").rstrip("/") + "/"
+    query = urlencode({"provider": "google", "redirect_to": frontend_url})
+    return {"redirect_url": f"{SUPABASE_URL.rstrip('/')}/auth/v1/authorize?{query}"}
 
 
 @app.get("/api/stories/feed")
