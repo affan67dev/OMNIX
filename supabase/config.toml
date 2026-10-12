@@ -1,0 +1,28 @@
+project_id = "omnix-social"
+
+[api]
+enabled = true
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+major_version = 17
+
+[studio]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "https://omnix-social-web.onrender.com"
+additional_redirect_urls = [
+  "https://omnix-social-web.onrender.com/**",
+  "http://localhost:5173/**"
+]
+enable_signup = true
+jwt_expiry = 3600
+
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
