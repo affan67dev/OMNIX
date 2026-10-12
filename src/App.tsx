@@ -6,27 +6,42 @@ import { ErrorTracker } from './components/ErrorTracker';
 import { CrashMonitor } from './components/security/CrashMonitor';
 import { supabase } from './supabase/supabaseClient';
 
+type AppAuthState = 'loading' | 'signed-out' | 'profile-incomplete' | 'ready';
+
 function AppContent() {
-  const [sessionReady, setSessionReady] = useState(false);
-  const [authenticated, setAuthenticated] = useState(false);
+  const [authState, setAuthState] = useState<AppAuthState>('loading');
 
   useEffect(() => {
     let mounted = true;
 
-    void supabase.auth.getSession().then(({ data, error }) => {
-      if (!mounted) return;
-      setAuthenticated(!error && Boolean(data.session));
-      setSessionReady(true);
-    }).catch(() => {
-      if (!mounted) return;
-      setAuthenticated(false);
-      setSessionReady(true);
-    });
+    const resolveSession = async (session: any) => {
+      if (!session) {
+        if (mounted) setAuthState('signed-out');
+        return;
+      }
+
+      try {
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('username')
+          .eq('user_id', session.user.id)
+          .maybeSingle();
+
+        if (!mounted) return;
+        setAuthState(!error && Boolean(profile?.username) ? 'ready' : 'profile-incomplete');
+      } catch {
+        if (mounted) setAuthState('profile-incomplete');
+      }
+    };
+
+    void supabase.auth.getSession()
+      .then(({ data, error }) => resolveSession(!error ? data.session : null))
+      .catch(() => {
+        if (mounted) setAuthState('signed-out');
+      });
 
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!mounted) return;
-      setAuthenticated(Boolean(session));
-      setSessionReady(true);
+      void resolveSession(session);
     });
 
     return () => {
@@ -35,11 +50,12 @@ function AppContent() {
     };
   }, []);
 
+  const authenticated = authState === 'ready';
+
   return (
     <>
       <CrashMonitor />
-      {sessionReady && authenticated ? <AuthContainer /> : null}
-      {(!sessionReady || !authenticated) ? <AuthenticationOverlay /> : null}
+      {authenticated ? <AuthContainer /> : <AuthenticationOverlay />}
       <PasswordRecoveryOverlay />
     </>
   );
